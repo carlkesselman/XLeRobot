@@ -25,7 +25,7 @@ import draccus
 
 from .xlerobot import XLerobot
 from .config_xlerobot import XLerobotConfig, XLerobotHostConfig
-
+from .lerobot import RobotConfig
 
 class XLerobotHost:
     def __init__(self, config: XLerobotHostConfig):
@@ -51,7 +51,7 @@ class XLerobotHost:
 def main():
     logging.info("Configuring Xlerobot")
     # robot_config = XLerobotConfig(id="my_xlerobot_pc")
-    robot_config = draccus.parse(config_class=XLerobotConfig)
+    robot_config = draccus.parse(config_class=RobotConfig)
     robot = XLerobot(robot_config)
 
     logging.info("Connecting Xlerobot")
