@@ -21,6 +21,7 @@ import time
 
 import cv2
 import zmq
+import draccus
 
 from .xlerobot import XLerobot
 from .config_xlerobot import XLerobotConfig, XLerobotHostConfig
@@ -49,7 +50,8 @@ class XLerobotHost:
 
 def main():
     logging.info("Configuring Xlerobot")
-    robot_config = XLerobotConfig(id="my_xlerobot_pc")
+    # robot_config = XLerobotConfig(id="my_xlerobot_pc")
+    robot_config = draccus.parse(config_class=XLerobotConfig)
     robot = XLerobot(robot_config)
 
     logging.info("Connecting Xlerobot")
