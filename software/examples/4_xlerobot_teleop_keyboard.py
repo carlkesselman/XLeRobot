@@ -11,10 +11,12 @@ PYTHONPATH=src python -m examples.xlerobot.teleoperate_Keyboard
 import time
 import numpy as np
 import math
+import draccus
 
 from lerobot.robots.xlerobot import XLerobotClient, XLerobotClientConfig, XLerobotConfig, XLerobot
+from lerobot.robots import RobotConfig
 from lerobot.utils.robot_utils import busy_wait
-from lerobot.utils.visualization_utils import _init_rerun, log_rerun_data
+from lerobot.utils.visualization_utils import init_rerun, log_rerun_data
 from lerobot.model.SO101Robot import SO101Kinematics
 from lerobot.teleoperators.keyboard.teleop_keyboard import KeyboardTeleop, KeyboardTeleopConfig
 
@@ -386,12 +388,14 @@ def main():
     ip = "localhost"  # This is for local/wired connection
     robot_name = "my_xlerobot_pc"
 
+    robot_config = draccus.parse(config_class=RobotConfig)
+    print(f"Configuring robot of type: {robot_config.type}")
     # For zmq connection
     # robot_config = XLerobotClientConfig(remote_ip=ip, id=robot_name)
     # robot = XLerobotClient(robot_config)    
 
     # For local/wired connection
-    robot_config = XLerobotConfig()
+    #robot_config = XLerobotConfig()
     robot = XLerobot(robot_config)
     
     try:
@@ -403,7 +407,7 @@ def main():
         print(robot)
         return
         
-    _init_rerun(session_name="xlerobot_teleop_v2")
+    init_rerun(session_name="xlerobot_teleop_v2")
 
     #Init the keyboard instance
     keyboard_config = KeyboardTeleopConfig()
