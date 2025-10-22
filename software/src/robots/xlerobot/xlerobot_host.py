@@ -25,7 +25,7 @@ import draccus
 
 from .xlerobot import XLerobot
 from .config_xlerobot import XLerobotConfig, XLerobotHostConfig
-from .lerobot import RobotConfig
+from lerobot.robots.config import RobotConfig
 
 class XLerobotHost:
     def __init__(self, config: XLerobotHostConfig):
