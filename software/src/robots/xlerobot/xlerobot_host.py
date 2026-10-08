@@ -15,6 +15,8 @@
 # limitations under the License.
 
 import argparse
+
+import draccus
 import base64
 import json
 import logging
@@ -50,6 +52,17 @@ class XLerobotHost:
 
 def main():
     parser = argparse.ArgumentParser(description="XLerobot Host")
+    parser.add_argument(
+        "--config_path",
+        type=str,
+        default=None,
+        help=(
+            "YAML with the full XLerobotConfig (ports, cameras, ...). Use this "
+            "when the robot has cameras: the individual flags below cannot "
+            "express them. Fields are at the top level of the file, not nested "
+            "under 'robot:'. When given, the flags below are ignored."
+        ),
+    )
     parser.add_argument("--robot.id", type=str, default="my_xlerobot_pc", help="Robot ID")
     parser.add_argument("--robot.port1", type=str, default="/dev/ttyACM0", help="Port 1")
     parser.add_argument("--robot.port2", type=str, default="/dev/ttyACM1", help="Port 2")
@@ -62,12 +75,24 @@ def main():
     args = parser.parse_args()
 
     logging.info("Configuring Xlerobot")
-    # argparse stores dotted flags as literal attribute names, not nested namespaces
-    robot_config = XLerobotConfig(
-        id=getattr(args, "robot.id"),
-        port1=getattr(args, "robot.port1"),
-        port2=getattr(args, "robot.port2"),
-    )
+    if args.config_path:
+        # draccus resolves the camera entries' `type:` discriminators through
+        # the CameraConfig registry, which plain argparse cannot do.
+        robot_config = draccus.parse(
+            config_class=XLerobotConfig, args=["--config_path", args.config_path]
+        )
+        logging.info("Loaded robot config from %s", args.config_path)
+    else:
+        # argparse stores dotted flags as literal attribute names, not nested namespaces
+        robot_config = XLerobotConfig(
+            id=getattr(args, "robot.id"),
+            port1=getattr(args, "robot.port1"),
+            port2=getattr(args, "robot.port2"),
+        )
+        logging.warning(
+            "No --config_path given: running with no cameras, since the flags "
+            "cannot express them. The client will receive joint state only."
+        )
     robot = XLerobot(robot_config)
 
     logging.info("Connecting Xlerobot")
