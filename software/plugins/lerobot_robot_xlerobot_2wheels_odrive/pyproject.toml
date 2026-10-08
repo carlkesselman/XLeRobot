@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "lerobot_robot_xlerobot_2wheels_odrive"
+version = "0.1.0"
+description = "XLeRobot 2-wheel brushless (ODrive) base plugin for lerobot (RobotConfig.register_subclass 'xlerobot_2wheels_odrive')"
+requires-python = ">=3.10"
+dependencies = [
+    "lerobot[feetech]",
+    "pyzmq>=25.0.0",
+    # ODrive v3.x / 0.5.x firmware. Pinned below 0.6 because that release
+    # removed axis.encoder and renamed much of the API this driver uses.
+    "odrive>=0.5.4,<0.6",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["lerobot_robot_xlerobot_2wheels_odrive"]

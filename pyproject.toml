@@ -41,6 +41,12 @@ dependencies = [
     "lerobot_robot_xlerobot_2wheels",
 ]
 
+[dependency-groups]
+# Brushless 2-wheel base on an ODrive. Not a default dependency because it
+# pulls the odrive package, which is only useful with that board attached:
+#   uv sync --group odrive
+odrive = ["lerobot_robot_xlerobot_2wheels_odrive"]
+
 [project.optional-dependencies]
 mecanum = ["lerobot_robot_xlerobot_mecanum"]
 vr = ["lerobot_teleoperator_xlerobot_vr"]
@@ -68,3 +74,4 @@ lerobot_robot_xlerobot = { workspace = true }
 lerobot_robot_xlerobot_2wheels = { workspace = true }
 lerobot_robot_xlerobot_mecanum = { workspace = true }
 lerobot_teleoperator_xlerobot_vr = { workspace = true }
+lerobot_robot_xlerobot_2wheels_odrive = { workspace = true }
