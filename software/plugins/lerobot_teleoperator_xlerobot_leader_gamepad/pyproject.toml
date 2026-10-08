@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "lerobot_teleoperator_xlerobot_leader_gamepad"
+version = "0.1.0"
+description = "Leader arms + gamepad as one teleoperator for XLeRobot (TeleoperatorConfig.register_subclass 'xlerobot_leader_gamepad')"
+requires-python = ">=3.10"
+dependencies = [
+    "lerobot[feetech]",
+    # pygame, for reading the gamepad as a device. Unlike lerobot's keyboard
+    # teleoperation (pynput global key capture) this works on Wayland.
+    "lerobot[gamepad]",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["lerobot_teleoperator_xlerobot_leader_gamepad"]
