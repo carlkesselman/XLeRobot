@@ -1,0 +1,20 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "lerobot_teleoperator_xlerobot_leader_remote"
+version = "0.1.0"
+description = "Leader arms and gamepad served over ZMQ from an operator station (TeleoperatorConfig.register_subclass 'xlerobot_leader_remote')"
+requires-python = ">=3.10"
+dependencies = [
+    "lerobot",
+    "pyzmq>=26.0.0",
+    # The host half instantiates the local leaders+gamepad teleoperator.
+    # The client half (on the cart) does not need it, but one package is
+    # simpler than splitting a 300-line pair across two.
+    "lerobot_teleoperator_xlerobot_leader_gamepad",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["lerobot_teleoperator_xlerobot_leader_remote"]

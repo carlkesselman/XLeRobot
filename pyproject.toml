@@ -41,7 +41,14 @@ dependencies = [
     "lerobot_robot_xlerobot_2wheels",
 
     # Leader arms + gamepad, presented to lerobot as a single teleoperator.
+    # Used directly when everything is on one machine, and by the host half
+    # of the remote pair below.
     "lerobot_teleoperator_xlerobot_leader_gamepad",
+
+    # The same leaders and gamepad, served over the network. The cart runs
+    # the robot, the cameras and the dataset; the operator station runs
+    # leader_host.py and holds the physical leaders.
+    "lerobot_teleoperator_xlerobot_leader_remote",
 ]
 
 [dependency-groups]
@@ -49,9 +56,6 @@ dependencies = [
 # pulls the odrive package, which is only useful with that board attached:
 #   uv sync --group odrive
 odrive = ["lerobot_robot_xlerobot_2wheels_odrive"]
-
-# Leader arms + gamepad as one teleoperator. Default rather than a group:
-# it is how the robot is driven, and pygame is small.
 
 [project.optional-dependencies]
 mecanum = ["lerobot_robot_xlerobot_mecanum"]
@@ -82,3 +86,4 @@ lerobot_robot_xlerobot_mecanum = { workspace = true }
 lerobot_teleoperator_xlerobot_vr = { workspace = true }
 lerobot_robot_xlerobot_2wheels_odrive = { workspace = true }
 lerobot_teleoperator_xlerobot_leader_gamepad = { workspace = true }
+lerobot_teleoperator_xlerobot_leader_remote = { workspace = true }

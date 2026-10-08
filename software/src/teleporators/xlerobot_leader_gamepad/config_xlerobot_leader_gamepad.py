@@ -68,6 +68,32 @@ class XLerobotLeaderGamepadConfig(TeleoperatorConfig):
     # cannot - set false for xlerobot_2wheels* and y.vel is dropped.
     emit_y_vel: bool = True
 
+    # Arm key naming. XLerobot filters incoming actions with
+    # startswith("left_arm_"), so BiSOLeader's native `left_shoulder_pan.pos`
+    # has to be remapped to `left_arm_shoulder_pan.pos` - that is what this
+    # class exists for.
+    #
+    # bi_so_follower wants the OPPOSITE: its send_action does
+    # key.removeprefix("left_"), so it needs the native naming and would
+    # make nonsense of `left_arm_shoulder_pan.pos`. Set this false when the
+    # robot on the other end is bi_so_follower rather than xlerobot.
+    #
+    # Getting this wrong is silent in both directions. The robot connects,
+    # the loop runs at the right rate, and the arms do not move.
+    remap_arm_prefix: bool = True
+
+    # Which parts of the robot this teleoperator speaks for. Both default to
+    # true, for the full xlerobot.
+    #
+    # Set them false to drive a robot that does not have those motors yet -
+    # bi_so_follower, say, which is two arms and nothing else. Sending it
+    # head or base keys it has no motors for is not harmless: the action
+    # dict is matched against motor names, so the extra keys are at best
+    # ignored and at worst an error, and they would also land in a recorded
+    # dataset as columns the robot cannot reproduce.
+    emit_head: bool = True
+    emit_base: bool = True
+
     # --- head ---------------------------------------------------------
     # The stick sets a RATE, integrated into a target position, so the head
     # holds still when the stick is centred.

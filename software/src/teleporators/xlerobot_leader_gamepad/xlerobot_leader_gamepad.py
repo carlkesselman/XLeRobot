@@ -60,9 +60,10 @@ class XLerobotLeaderGamepad(Teleoperator):
 
     # ---------------------------------------------------------------- naming
 
-    @classmethod
-    def _remap(cls, key: str) -> str:
-        for old, new in cls._PREFIX:
+    def _remap(self, key: str) -> str:
+        if not self.config.remap_arm_prefix:
+            return key
+        for old, new in self._PREFIX:
             if key.startswith(old):
                 return new + key[len(old) :]
         return key
@@ -74,12 +75,14 @@ class XLerobotLeaderGamepad(Teleoperator):
         feats: dict[str, type] = {
             self._remap(k): v for k, v in self.leaders.action_features.items()
         }
-        feats["head_motor_1.pos"] = float
-        feats["head_motor_2.pos"] = float
-        feats["x.vel"] = float
-        if self.config.emit_y_vel:
-            feats["y.vel"] = float
-        feats["theta.vel"] = float
+        if self.config.emit_head:
+            feats["head_motor_1.pos"] = float
+            feats["head_motor_2.pos"] = float
+        if self.config.emit_base:
+            feats["x.vel"] = float
+            if self.config.emit_y_vel:
+                feats["y.vel"] = float
+            feats["theta.vel"] = float
         return feats
 
     @cached_property
@@ -211,12 +214,14 @@ class XLerobotLeaderGamepad(Teleoperator):
         action: dict[str, Any] = {
             self._remap(k): v for k, v in self.leaders.get_action().items()
         }
-        action["head_motor_1.pos"] = self.head_targets["head_motor_1"]
-        action["head_motor_2.pos"] = self.head_targets["head_motor_2"]
-        action["x.vel"] = fwd * cfg.base_speed_mps * self.speed_scale
-        if cfg.emit_y_vel:
-            action["y.vel"] = strafe * cfg.base_speed_mps * self.speed_scale
-        action["theta.vel"] = -turn * cfg.base_turn_degps * self.speed_scale
+        if cfg.emit_head:
+            action["head_motor_1.pos"] = self.head_targets["head_motor_1"]
+            action["head_motor_2.pos"] = self.head_targets["head_motor_2"]
+        if cfg.emit_base:
+            action["x.vel"] = fwd * cfg.base_speed_mps * self.speed_scale
+            if cfg.emit_y_vel:
+                action["y.vel"] = strafe * cfg.base_speed_mps * self.speed_scale
+            action["theta.vel"] = -turn * cfg.base_turn_degps * self.speed_scale
         return action
 
     def send_feedback(self, feedback: dict[str, Any]) -> None:
