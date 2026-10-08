@@ -1,0 +1,70 @@
+# uv workspace root for running XLeRobot on top of a local lerobot checkout.
+#
+#   uv sync          # installs lerobot (editable, from ../lerobot) + the plugins
+#   uv sync --extra mecanum --extra vr
+#
+# This project is virtual (`package = false`): it is never built or installed
+# itself, it only declares what the environment should contain. The plugins
+# under software/plugins/ are workspace members, so they install editable from
+# this checkout.
+#
+# The important bit is [tool.uv.sources] below. Every plugin declares a
+# dependency on `lerobot`, and a source at the workspace root applies to all
+# members - so their `lerobot` resolves to the local fork rather than to the
+# published package on PyPI. Without it, uv would install upstream lerobot
+# alongside the fork and both would provide a `lerobot` module.
+
+[project]
+name = "xlerobot-env"
+version = "0.0.0"
+description = "Environment for Carl's XLeRobot: local lerobot fork plus the XLeRobot plugins"
+# Pinned to 3.12 exactly, not just >=3.12. lerobot needs >=3.12, but on ARM
+# pyrealsense2 publishes aarch64 wheels for cp39/cp310/cp312 only - no cp313,
+# no cp314, and no sdist to build from. Without the upper bound uv selects the
+# newest interpreter it can find and the RealSense install fails.
+requires-python = ">=3.12,<3.13"
+
+dependencies = [
+    # The fork, with the extras this robot needs. Deliberately not `dataset`:
+    # that pulls torchcodec, which on aarch64 needs >=0.11.0 and torch>=2.11.
+    # Add it when you start recording.
+    "lerobot[feetech,intelrealsense,viz]",
+
+    # Shared SO101 kinematics, used by the robots and the examples.
+    "xlerobot_model",
+
+    # 3-omniwheel base (--robot.type=xlerobot / xlerobot_client).
+    "lerobot_robot_xlerobot",
+
+    # 2-wheel differential drive, Feetech servos
+    # (--robot.type=xlerobot_2wheels / xlerobot_2wheels_client).
+    "lerobot_robot_xlerobot_2wheels",
+]
+
+[project.optional-dependencies]
+mecanum = ["lerobot_robot_xlerobot_mecanum"]
+vr = ["lerobot_teleoperator_xlerobot_vr"]
+dataset = ["lerobot[dataset]"]
+
+[tool.uv]
+# Virtual: declare the environment, don't build or install this directory.
+package = false
+# lerobot requires Python >=3.12, and on ARM pyrealsense2 has aarch64 wheels
+# only up to cp312 (no cp313, no sdist). Let uv fetch its own interpreter
+# rather than depend on whatever the system ships.
+python-preference = "managed"
+
+[tool.uv.workspace]
+members = ["software/plugins/*"]
+
+[tool.uv.sources]
+# The fork. Relative to this file, so it holds on any machine where the two
+# repos are siblings. Override by moving the checkout, not by editing this.
+lerobot = { path = "../lerobot", editable = true }
+
+# Plugins resolve from this workspace rather than from an index.
+xlerobot_model = { workspace = true }
+lerobot_robot_xlerobot = { workspace = true }
+lerobot_robot_xlerobot_2wheels = { workspace = true }
+lerobot_robot_xlerobot_mecanum = { workspace = true }
+lerobot_teleoperator_xlerobot_vr = { workspace = true }
