@@ -14,6 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import argparse
 import base64
 import json
 import logging
@@ -55,15 +56,38 @@ class XLerobotHost:
 
 
 def main():
+    parser = argparse.ArgumentParser(description="XLerobot Mecanum Host")
+    parser.add_argument("--robot.id", type=str, default="xlerobot_follower_mecanum", help="Robot ID")
+    parser.add_argument("--robot.port1", type=str, default="/dev/ttyACM1", help="Port 1")
+    parser.add_argument("--robot.port2", type=str, default="/dev/ttyACM0", help="Port 2")
+    parser.add_argument("--host.port_zmq_cmd", type=int, default=5555, help="ZMQ command port")
+    parser.add_argument("--host.port_zmq_observations", type=int, default=5556, help="ZMQ observation port")
+    parser.add_argument("--host.connection_time_s", type=int, default=3600, help="Connection time limit")
+    parser.add_argument("--host.watchdog_timeout_ms", type=int, default=500, help="Watchdog timeout")
+    parser.add_argument("--host.max_loop_freq_hz", type=int, default=30, help="Max loop frequency")
+
+    args = parser.parse_args()
+
     logging.info("Configuring Xlerobot")
-    robot_config = XLerobotConfig(id="xlerobot_follower_mecanum", port1="/dev/ttyACM1", port2="/dev/ttyACM0")
+    # argparse stores dotted flags as literal attribute names, not nested namespaces
+    robot_config = XLerobotConfig(
+        id=getattr(args, "robot.id"),
+        port1=getattr(args, "robot.port1"),
+        port2=getattr(args, "robot.port2"),
+    )
     robot = XLerobot(robot_config)
 
     logging.info("Connecting Xlerobot")
     robot.connect()
 
     logging.info("Starting HostAgent")
-    host_config = XLerobotHostConfig()
+    host_config = XLerobotHostConfig(
+        port_zmq_cmd=getattr(args, "host.port_zmq_cmd"),
+        port_zmq_observations=getattr(args, "host.port_zmq_observations"),
+        connection_time_s=getattr(args, "host.connection_time_s"),
+        watchdog_timeout_ms=getattr(args, "host.watchdog_timeout_ms"),
+        max_loop_freq_hz=getattr(args, "host.max_loop_freq_hz"),
+    )
     host = XLerobotHost(host_config)
 
     last_cmd_time = time.time()
