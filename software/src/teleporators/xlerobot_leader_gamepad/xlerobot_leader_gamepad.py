@@ -7,7 +7,7 @@ import time
 from functools import cached_property
 from typing import Any
 
-from lerobot.errors import DeviceAlreadyConnectedError, DeviceNotConnectedError
+from lerobot.utils.errors import DeviceAlreadyConnectedError, DeviceNotConnectedError
 from lerobot.teleoperators.bi_so_leader import BiSOLeader, BiSOLeaderConfig
 from lerobot.teleoperators.teleoperator import Teleoperator
 

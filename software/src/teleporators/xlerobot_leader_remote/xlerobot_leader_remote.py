@@ -16,7 +16,7 @@ from typing import Any
 
 import zmq
 
-from lerobot.errors import DeviceAlreadyConnectedError, DeviceNotConnectedError
+from lerobot.utils.errors import DeviceAlreadyConnectedError, DeviceNotConnectedError
 from lerobot.teleoperators.teleoperator import Teleoperator
 
 from .config_xlerobot_leader_remote import XLerobotLeaderRemoteConfig
