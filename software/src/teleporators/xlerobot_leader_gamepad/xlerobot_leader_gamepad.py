@@ -78,6 +78,7 @@ class XLerobotLeaderGamepad(Teleoperator):
         self.speed_scale = config.base_speed_scale
         self._last_tick: float | None = None
         self._prev_buttons: set[int] = set()
+        self._warned_no_hat = False
 
     # ---------------------------------------------------------------- naming
 
@@ -209,13 +210,37 @@ class XLerobotLeaderGamepad(Teleoperator):
                 logger.info("base speed scale: %.2f", self.speed_scale)
         self._prev_buttons = pressed
 
-        head_mode = self._button(cfg.button_head_modifier) if cfg.button_head_modifier >= 0 else False
+        # --- head: the control gives a RATE, integrated into a target -------
+        #
+        # Two schemes. The D-pad is the default: the head gets its own
+        # control, the right stick stays on turn, and nothing is held. The
+        # modifier scheme is the fallback for a pad with no hat.
+        use_hat = cfg.hat_head >= 0 and self.joystick.get_numhats() > cfg.hat_head
+        if cfg.hat_head >= 0 and not use_hat:
+            if not self._warned_no_hat:
+                self._warned_no_hat = True
+                logger.warning(
+                    "hat_head=%d but this pad reports %d hats; falling back to "
+                    "the %s scheme.",
+                    cfg.hat_head,
+                    self.joystick.get_numhats(),
+                    "modifier button" if cfg.button_head_modifier >= 0 else "shared stick",
+                )
 
-        # --- head: stick gives a rate, integrated into a target -------------
-        pan = self._axis(cfg.axis_head_pan) if (head_mode or cfg.button_head_modifier < 0) else 0.0
-        tilt = self._axis(cfg.axis_head_tilt) if (head_mode or cfg.button_head_modifier < 0) else 0.0
-        if cfg.invert_head_tilt:
-            tilt = -tilt
+        if use_hat:
+            hx, hy = self.joystick.get_hat(cfg.hat_head)
+            pan = -float(hx) if cfg.invert_hat_pan else float(hx)
+            tilt = -float(hy) if cfg.invert_hat_tilt else float(hy)
+            head_mode = False          # the right stick never stops turning
+        else:
+            head_mode = (
+                self._button(cfg.button_head_modifier) if cfg.button_head_modifier >= 0 else False
+            )
+            share = head_mode or cfg.button_head_modifier < 0
+            pan = self._axis(cfg.axis_head_pan) if share else 0.0
+            tilt = self._axis(cfg.axis_head_tilt) if share else 0.0
+            if cfg.invert_head_tilt:
+                tilt = -tilt
 
         self.head_targets["head_motor_1"] = max(
             cfg.head_min_deg,

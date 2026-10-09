@@ -46,8 +46,27 @@ class XLerobotLeaderGamepadConfig(TeleoperatorConfig):
     invert_base_forward: bool = True
     invert_head_tilt: bool = True
 
-    # While held, the right stick aims the head instead of turning the base.
-    # Set to -1 to give the head its own axes instead and never share.
+    # --- head controls ------------------------------------------------
+    #
+    # A 3-omni base uses three stick axes (forward, strafe, turn), leaving
+    # one short for a pan-tilt head - hence the modifier below. The D-pad
+    # avoids the whole problem: the head gets its own control, the right
+    # stick stays on turn, and nothing has to be held.
+    #
+    # Set hat_head to -1 to fall back to the modifier scheme (or if the pad
+    # has no hat). Discrete rather than proportional, but the head
+    # integrates a RATE into a target anyway, so holding a direction sweeps
+    # it - which is how the sticks behaved too.
+    hat_head: int = 0
+
+    # The hat reports +1 for up and +1 for right. head_motor_2 has to
+    # DECREASE to raise the head on this robot, hence the tilt default.
+    invert_hat_pan: bool = False
+    invert_hat_tilt: bool = True
+
+    # Only used when hat_head < 0. While held, the right stick aims the head
+    # instead of turning the base. Set to -1 to give the head its own axes
+    # and never share.
     button_head_modifier: int = 4   # left shoulder
 
     button_speed_up: int = 5        # right shoulder
