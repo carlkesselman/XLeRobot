@@ -49,6 +49,11 @@ logger = logging.getLogger(__name__)
 # retries on the same motor seconds later. stop_base() upstream already
 # uses num_retry=5 for the same reason.
 BUS_RETRY = 3
+# How many consecutive failed state reads to ride out on the last good
+# state before giving up. 10 ticks at 30 Hz is a third of a second - long
+# enough to absorb a burst of bad packets, short enough that a bus that has
+# actually gone away is not driven blind for long.
+MAX_CONSECUTIVE_READ_FAILURES = 10
 
 
 class XLerobot(Robot):
@@ -139,6 +144,11 @@ class XLerobot(Robot):
         self.right_arm_motors = [motor for motor in self.bus2.motors if motor.startswith("right_arm")]
         self.head_motors = [motor for motor in self.bus1.motors if motor.startswith("head")]
         self.base_motors = [motor for motor in self.bus2.motors if motor.startswith("base")]
+
+        # Last good state read, and how many reads in a row have failed.
+        # See get_observation().
+        self._last_proprio: tuple[dict, dict, dict] | None = None
+        self._read_failures = 0
         self.cameras = make_cameras_from_configs(config.cameras)
 
     @property
@@ -561,13 +571,51 @@ class XLerobot(Robot):
         if not self.is_connected:
             raise DeviceNotConnectedError(f"{self} is not connected.")
 
-        # Read actuators position for arm and vel for base
+        # Read actuators position for arm and vel for base.
+        #
+        # Three transactions, not four: bus 1 reads the left arm and the head
+        # in one Present_Position sync_read. Fewer packets is fewer chances
+        # for one to come back corrupted, and a shorter window between the
+        # proprioception and the images read next.
+        #
+        # Every read retries. A bus with 17 servos drops a reply now and
+        # then - "[TxRxResult] Incorrect status packet!" - and at 90
+        # transactions a second a 30-minute session is a statistical
+        # certainty. With num_retry=0 that one packet ended the run, lost the
+        # episode, and (because disconnect() was skipped on the way out)
+        # could leave the base driving. Now it is retried, and if the bus is
+        # genuinely gone for a moment the last good state is reused for a
+        # few ticks before giving up, so a recording survives a burst.
         start = time.perf_counter()
-        left_arm_pos = self.bus1.sync_read("Present_Position", self.left_arm_motors)
-        right_arm_pos = self.bus2.sync_read("Present_Position", self.right_arm_motors)
-        head_pos = self.bus1.sync_read("Present_Position", self.head_motors)
-        base_wheel_vel = self.bus2.sync_read("Present_Velocity", self.base_motors)
-        
+        try:
+            bus1_pos = self.bus1.sync_read(
+                "Present_Position", self.left_arm_motors + self.head_motors, num_retry=BUS_RETRY
+            )
+            right_arm_pos = self.bus2.sync_read(
+                "Present_Position", self.right_arm_motors, num_retry=BUS_RETRY
+            )
+            base_wheel_vel = self.bus2.sync_read(
+                "Present_Velocity", self.base_motors, num_retry=BUS_RETRY
+            )
+        except ConnectionError as e:
+            self._read_failures += 1
+            if self._last_proprio is None or self._read_failures > MAX_CONSECUTIVE_READ_FAILURES:
+                raise
+            if self._read_failures == 1 or self._read_failures % 10 == 0:
+                logger.warning(
+                    "%s: state read failed (%d in a row), reusing last good state: %s",
+                    self, self._read_failures, e,
+                )
+            bus1_pos, right_arm_pos, base_wheel_vel = self._last_proprio
+        else:
+            if self._read_failures:
+                logger.info("%s: state reads recovered after %d failure(s)", self, self._read_failures)
+            self._read_failures = 0
+            self._last_proprio = (bus1_pos, right_arm_pos, base_wheel_vel)
+
+        left_arm_pos = {k: bus1_pos[k] for k in self.left_arm_motors}
+        head_pos = {k: bus1_pos[k] for k in self.head_motors}
+
         base_vel = self._wheel_raw_to_body(
             base_wheel_vel["base_left_wheel"],
             base_wheel_vel["base_back_wheel"],
