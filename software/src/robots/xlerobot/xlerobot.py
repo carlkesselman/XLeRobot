@@ -15,6 +15,7 @@
 # limitations under the License.
 
 import logging
+import sys
 import time
 from functools import cached_property
 from itertools import chain
@@ -182,9 +183,18 @@ class XLerobot(Robot):
         # Check if calibration file exists and ask user if they want to restore it
         if self.calibration_fpath.is_file():
             logger.info(f"Calibration file found at {self.calibration_fpath}")
-            user_input = input(
-                f"Press ENTER to restore calibration from file, or type 'c' and press ENTER to run manual calibration: "
-            )
+
+            # Only ask a human who is actually there. This used to prompt
+            # unconditionally, which hangs every non-interactive run - a
+            # scheduled recording, a systemd unit, anything with a pipe for
+            # stdin - on an input() nobody can answer, with no output to say
+            # why. calibrate=False means "do not calibrate", so there is
+            # nothing to offer either.
+            user_input = ""
+            if calibrate and sys.stdin is not None and sys.stdin.isatty():
+                user_input = input(
+                    "Press ENTER to restore calibration from file, or type 'c' and press ENTER to run manual calibration: "
+                )
             if user_input.strip().lower() != "c":
                 logger.info("Attempting to restore calibration from file...")
                 try:
