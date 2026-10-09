@@ -15,6 +15,20 @@ from .config_xlerobot_leader_gamepad import XLerobotLeaderGamepadConfig
 
 logger = logging.getLogger(__name__)
 
+def _headless_sdl() -> None:
+    """Let SDL start without a display.
+
+    The gamepad is read over /dev/input, which needs no video at all, but
+    pygame.init() brings up SDL's video subsystem and that fails on a bare
+    SSH session - "No available video device". The leader host runs headless
+    by design, so this is the normal case, not the exception.
+    """
+    import os
+
+    if not os.environ.get("DISPLAY") and not os.environ.get("WAYLAND_DISPLAY"):
+        os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+
+
 
 class XLerobotLeaderGamepad(Teleoperator):
     """Leader arms drive the arms; a gamepad aims the head and drives the base.
@@ -117,6 +131,7 @@ class XLerobotLeaderGamepad(Teleoperator):
             ) from e
 
         self._pygame = pygame
+        _headless_sdl()
         pygame.init()
         pygame.joystick.init()
 

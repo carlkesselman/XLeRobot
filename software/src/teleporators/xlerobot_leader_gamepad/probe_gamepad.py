@@ -21,6 +21,20 @@ import sys
 import time
 
 
+def _headless_sdl() -> None:
+    """Let SDL start without a display.
+
+    The gamepad is read over /dev/input, which needs no video at all, but
+    pygame.init() brings up SDL's video subsystem and that fails on a bare
+    SSH session - "No available video device". The leader host runs headless
+    by design, so this is the normal case, not the exception.
+    """
+    import os
+
+    if not os.environ.get("DISPLAY") and not os.environ.get("WAYLAND_DISPLAY"):
+        os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+
+
 def main() -> int:
     try:
         import pygame
@@ -29,6 +43,7 @@ def main() -> int:
         print("  uv pip install 'lerobot[gamepad]'", file=sys.stderr)
         return 1
 
+    _headless_sdl()
     pygame.init()
     pygame.joystick.init()
 
