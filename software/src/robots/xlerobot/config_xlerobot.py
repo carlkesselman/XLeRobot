@@ -65,6 +65,24 @@ class XLerobotConfig(RobotConfig):
     # Set to `True` for backward compatibility with previous policies/dataset
     use_degrees: bool = False
 
+    # --- head motion profile ---------------------------------------------
+    # The head is commanded as a stream of absolute positions, ~1 unit apart
+    # at 30 Hz when the operator holds the D-pad. configure_motors() leaves
+    # every servo at Acceleration=254 (maximum) with no speed limit, so each
+    # of those steps is a full-torque jump followed by a hold: thirty nudges
+    # a second, which on a light pan/tilt carrying the camera you are
+    # watching through reads as jerk. The arms get the same treatment and
+    # hide it behind a human hand and their own inertia.
+    #
+    # These two registers make the servo interpolate across the tick instead.
+    # Units are the servo's own: Goal_Velocity in steps/s (0 = unlimited),
+    # Acceleration in units of 100 steps/s^2 (0 = unlimited). With a
+    # calibrated head range of ~2000 steps, the operator's 30 units/s is
+    # ~300 steps/s, so 600 keeps up with headroom while 40 (= 4000 steps/s^2)
+    # reaches it in 0.15 s. They also cap the lunge after a link stall.
+    head_goal_velocity: int = 600
+    head_acceleration: int = 40
+
     teleop_keys: dict[str, str] = field(
         default_factory=lambda: {
             # Movement

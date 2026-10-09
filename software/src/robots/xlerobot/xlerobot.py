@@ -348,6 +348,17 @@ class XLerobot(Robot):
             # Set I_Coefficient and D_Coefficient to default value 0 and 32
             self.bus1.write("I_Coefficient", name, 0, num_retry=BUS_RETRY)
             self.bus1.write("D_Coefficient", name, 43, num_retry=BUS_RETRY)
+            # A motion profile, so a 30 Hz stream of small position steps is
+            # executed as a glide rather than thirty jumps a second. The arms
+            # keep configure_motors()' Acceleration=254; see the config for why
+            # the head is different. Raw, not normalised: these are not
+            # positions.
+            self.bus1.write(
+                "Goal_Velocity", name, self.config.head_goal_velocity, normalize=False, num_retry=BUS_RETRY
+            )
+            self.bus1.write(
+                "Acceleration", name, self.config.head_acceleration, normalize=False, num_retry=BUS_RETRY
+            )
         
         for name in self.right_arm_motors:
             self.bus2.write("Operating_Mode", name, OperatingMode.POSITION.value, num_retry=BUS_RETRY)
