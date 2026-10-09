@@ -110,10 +110,19 @@ lerobot = { path = "../lerobot", editable = true }
 #   `... platform_machine == 'x86_64' and sys_platform == 'linux'`:
 #   https://download.pytorch.org/whl/cu128 / .../cu132
 #
-# Scoping to aarch64 leaves x86_64 to the fork's entry and says what is
-# true anyway: this extra exists for the Jetson.
-torch = [{ index = "pytorch-cu132", extra = "jetson", marker = "platform_machine == 'aarch64'" }]
-torchvision = [{ index = "pytorch-cu132", extra = "jetson", marker = "platform_machine == 'aarch64'" }]
+# Scoping leaves x86_64 to the fork's entry and says what is true anyway:
+# this extra exists for the Jetson.
+#
+# sys_platform is in the marker too, not just the machine. uv resolves for
+# EVERY environment it can imagine unless told otherwise, including
+# aarch64 Windows - which nobody will ever run this on, but where a
+# machine-only marker handed torch to cu132 while the fork's non-ARM pin
+# applied, and the lock failed on a platform that does not exist:
+#
+#   No solution found ... for split (markers: platform_machine == 'aarch64'
+#   and sys_platform == 'win32')
+torch = [{ index = "pytorch-cu132", extra = "jetson", marker = "sys_platform == 'linux' and platform_machine == 'aarch64'" }]
+torchvision = [{ index = "pytorch-cu132", extra = "jetson", marker = "sys_platform == 'linux' and platform_machine == 'aarch64'" }]
 
 # Plugins resolve from this workspace rather than from an index.
 xlerobot_model = { workspace = true }
