@@ -100,8 +100,20 @@ members = ["software/plugins/*"]
 lerobot = { path = "../lerobot", editable = true }
 
 # Only when --extra jetson is on; otherwise torch comes from PyPI (CPU).
-torch = [{ index = "pytorch-cu132", extra = "jetson" }]
-torchvision = [{ index = "pytorch-cu132", extra = "jetson" }]
+#
+# The aarch64 marker is NOT redundant. The fork's own pyproject routes torch
+# to cu128 on x86_64 linux, and those sources ARE read here - without the
+# marker both entries claim torch on that platform and uv refuses to resolve
+# at all:
+#
+#   Requirements contain conflicting indexes for package `torch` in split
+#   `... platform_machine == 'x86_64' and sys_platform == 'linux'`:
+#   https://download.pytorch.org/whl/cu128 / .../cu132
+#
+# Scoping to aarch64 leaves x86_64 to the fork's entry and says what is
+# true anyway: this extra exists for the Jetson.
+torch = [{ index = "pytorch-cu132", extra = "jetson", marker = "platform_machine == 'aarch64'" }]
+torchvision = [{ index = "pytorch-cu132", extra = "jetson", marker = "platform_machine == 'aarch64'" }]
 
 # Plugins resolve from this workspace rather than from an index.
 xlerobot_model = { workspace = true }
