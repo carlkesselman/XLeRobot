@@ -226,16 +226,36 @@ class XLerobot(Robot):
                     self.bus2.calibration = {k: v for k, v in self.calibration.items() if k in self.bus2.motors}
                     logger.info("Calibration data loaded into bus memory successfully!")
                     
-                    # Write calibration data to motors
-                    self.bus1.write_calibration({k: v for k, v in self.calibration.items() if k in self.bus1.motors})
-                    self.bus2.write_calibration({k: v for k, v in self.calibration.items() if k in self.bus2.motors})
+                    # Write calibration data to motors. write_calibration()
+                    # issues one bare write per motor per register with no
+                    # retry of its own, so retry the whole call.
+                    self._retry(
+                        lambda: self.bus1.write_calibration(
+                            {k: v for k, v in self.calibration.items() if k in self.bus1.motors}
+                        ),
+                        "bus1 write_calibration",
+                    )
+                    self._retry(
+                        lambda: self.bus2.write_calibration(
+                            {k: v for k, v in self.calibration.items() if k in self.bus2.motors}
+                        ),
+                        "bus2 write_calibration",
+                    )
                     logger.info("Calibration restored successfully from file!")
                     
                 except Exception as e:
-                    logger.warning(f"Failed to restore calibration from file: {e}")
-                    if calibrate:
-                        logger.info("Proceeding with manual calibration...")
-                        self.calibrate()
+                    # Do NOT fall through to calibrate() here. A dropped
+                    # packet during write_calibration is transient; manual
+                    # calibration is destructive - one reflexive ENTER at
+                    # the prompt rewrites Homing_Offset in every motor.
+                    # Twice this nearly cost the calibration. If the file
+                    # cannot be written to the motors, say so and stop;
+                    # the operator can pass 'c' at the prompt on purpose.
+                    raise RuntimeError(
+                        f"Failed to restore calibration from {self.calibration_fpath}: {e}. "
+                        "Not falling through to manual calibration. Check the buses and retry; "
+                        "if the file is genuinely bad, answer 'c' at the prompt to recalibrate."
+                    ) from e
             else:
                 logger.info("User chose manual calibration...")
                 if calibrate:
@@ -329,18 +349,33 @@ class XLerobot(Robot):
         print("Calibration saved to", self.calibration_fpath)
         
 
+    @staticmethod
+    def _retry(fn, what: str, tries: int = BUS_RETRY + 1):
+        """Call fn() up to `tries` times. For bus methods that take no num_retry."""
+        last: Exception | None = None
+        for attempt in range(1, tries + 1):
+            try:
+                return fn()
+            except Exception as e:  # noqa: BLE001
+                last = e
+                if attempt < tries:
+                    logger.warning(f"{what} failed (attempt {attempt}/{tries}): {e}; retrying")
+                    time.sleep(0.05)
+        raise RuntimeError(f"{what} failed after {tries} attempts: {last}") from last
+
     def configure(self):
         # Set-up arm actuators (position mode)
         # We assume that at connection time, arm is in a rest position,
         # and torque can be safely disabled to run calibration
         
-        # bus 1
+        # configure_motors() writes three registers per motor with no retry
+        # of its own; wrap the call so one dropped packet does not abort
+        # connect().
         self.bus1.disable_torque(num_retry=BUS_RETRY)
-        self.bus1.configure_motors()
+        self._retry(self.bus1.configure_motors, "bus1 configure_motors")
 
-        # bus 2
         self.bus2.disable_torque(num_retry=BUS_RETRY)
-        self.bus2.configure_motors()
+        self._retry(self.bus2.configure_motors, "bus2 configure_motors")
         
         
         for name in self.left_arm_motors:
@@ -718,13 +753,42 @@ class XLerobot(Robot):
         logger.info("Base motors stopped")
 
     def disconnect(self):
-        if not self.is_connected:
-            raise DeviceNotConnectedError(f"{self} is not connected.")
+        """Stop the base, drop torque, release everything. Never refuse.
 
-        self.stop_base()
-        self.bus1.disconnect(self.config.disable_torque_on_disconnect)
-        self.bus2.disconnect(self.config.disable_torque_on_disconnect)
-        for cam in self.cameras.values():
-            cam.disconnect()
+        This used to check is_connected first and raise if it was False.
+        is_connected requires every camera, so a wrist camera's USB
+        dropping out - the one thing that ends a run uninvited - made this
+        method raise before it reached stop_base(). STS3215 wheels in
+        velocity mode have no watchdog; they run on the last Goal_Velocity
+        until power-off. A disconnect that can decline to stop the base is
+        not a disconnect.
 
-        logger.info(f"{self} disconnected.")
+        Each step now stands alone: it runs if its own device is up, and a
+        failure in one does not skip the next.
+        """
+        problems: list[str] = []
+
+        if self.bus2.is_connected:
+            try:
+                self.stop_base()
+            except Exception as e:  # noqa: BLE001
+                problems.append(f"stop_base: {e}")
+
+        for name, bus in (("bus1", self.bus1), ("bus2", self.bus2)):
+            if bus.is_connected:
+                try:
+                    bus.disconnect(self.config.disable_torque_on_disconnect)
+                except Exception as e:  # noqa: BLE001
+                    problems.append(f"{name}: {e}")
+
+        for cam_name, cam in self.cameras.items():
+            if cam.is_connected:
+                try:
+                    cam.disconnect()
+                except Exception as e:  # noqa: BLE001
+                    problems.append(f"camera {cam_name}: {e}")
+
+        if problems:
+            logger.warning(f"{self} disconnected with problems: " + "; ".join(problems))
+        else:
+            logger.info(f"{self} disconnected.")
