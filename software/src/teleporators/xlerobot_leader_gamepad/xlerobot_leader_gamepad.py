@@ -38,7 +38,14 @@ class XLerobotLeaderGamepad(Teleoperator):
 
         self.leaders = BiSOLeader(
             BiSOLeaderConfig(
-                id=f"{config.id}_leaders" if config.id else None,
+                # config.id verbatim, NOT f"{config.id}_leaders". BiSOLeader
+                # appends _left / _right itself, so the suffix produced
+                # xlerobot_leaders_leaders_left - calibration files nobody
+                # has. Passing it through means this teleoperator reads the
+                # SAME per-arm calibration as bi_so_leader does from
+                # config/bi-arms.yaml: calibrate the leaders once, use them
+                # from either config.
+                id=config.id,
                 calibration_dir=config.calibration_dir,
                 left_arm_config=config.left_arm_config,
                 right_arm_config=config.right_arm_config,
