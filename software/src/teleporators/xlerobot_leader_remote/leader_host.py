@@ -70,7 +70,12 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    # NOT basicConfig alone: it is a no-op once the root logger has
+    # handlers, and importing lerobot installs them. Every status line here
+    # then vanishes - including "Publishing actions on ...", so a host that
+    # is working looks identical to one that hung during startup.
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    logging.getLogger().setLevel(logging.INFO)
 
     if args.config_path:
         config = draccus.parse(
@@ -98,7 +103,7 @@ def main() -> None:
     period = 1.0 / rate_hz
 
     teleop = XLerobotLeaderGamepad(config)
-    logger.info("Connecting the leader arms and gamepad")
+    print("Connecting the leader arms and gamepad ...", flush=True)
     teleop.connect(calibrate=not getattr(args, "host.no_calibrate"))
 
     ctx = zmq.Context()
@@ -109,9 +114,12 @@ def main() -> None:
     sock.setsockopt(zmq.CONFLATE, 1)
     sock.bind(f"tcp://*:{port}")
 
-    logger.info("Publishing actions on tcp://*:%d at %.0f Hz", port, rate_hz)
-    logger.info("Action keys: %s", sorted(teleop.action_features))
-    logger.info("Start the recorder on the cart now. Ctrl-C here to stop.")
+    feats = sorted(teleop.action_features)
+    print(f"\nPublishing on tcp://*:{port} at {rate_hz:.0f} Hz")
+    print(f"{len(feats)} action keys:")
+    for k in feats:
+        print(f"  {k}")
+    print("\nStart the cart now. Ctrl-C here to stop.\n", flush=True)
 
     sent = 0
     dropped = 0
@@ -132,12 +140,8 @@ def main() -> None:
 
             now = time.perf_counter()
             if now - last_report >= 5.0:
-                logger.info(
-                    "%d actions sent, %d dropped (no reader) in the last %.0fs",
-                    sent,
-                    dropped,
-                    now - last_report,
-                )
+                print(f"  {sent} sent, {dropped} dropped (no reader) "
+                      f"in {now - last_report:.0f}s", flush=True)
                 sent = dropped = 0
                 last_report = now
 
