@@ -29,6 +29,8 @@ import time
 import draccus
 import zmq
 
+from .link import SEQ_KEY, TIME_KEY, tune_socket
+
 from lerobot_teleoperator_xlerobot_leader_gamepad import (
     XLerobotLeaderGamepad,
     XLerobotLeaderGamepadConfig,
@@ -112,6 +114,7 @@ def main() -> None:
     # queued, so a slow or absent reader can never make us block or build a
     # backlog of stale poses.
     sock.setsockopt(zmq.CONFLATE, 1)
+    tune_socket(sock)  # TOS, heartbeats, keepalive - see link.py
     sock.bind(f"tcp://*:{port}")
 
     feats = sorted(teleop.action_features)
@@ -123,6 +126,7 @@ def main() -> None:
 
     sent = 0
     dropped = 0
+    seq = 0
     last_report = time.perf_counter()
 
     try:
@@ -130,17 +134,26 @@ def main() -> None:
             loop_start = time.perf_counter()
 
             action = teleop.get_action()
+            # Sequence number and send time ride along so the receiver can
+            # tell "late" from "new" and measure gaps. float() because a numpy
+            # scalar would make json.dumps raise and take the host down.
+            msg = {k: float(v) for k, v in action.items()}
+            msg[SEQ_KEY] = seq
+            msg[TIME_KEY] = time.time()
+            seq += 1
             try:
-                sock.send_string(json.dumps(action), flags=zmq.NOBLOCK)
+                sock.send_string(json.dumps(msg), flags=zmq.NOBLOCK)
                 sent += 1
             except zmq.Again:
-                # No peer attached yet, or its queue is full. Dropping is the
-                # right answer: the next action supersedes this one anyway.
+                # With CONFLATE this means NO PEER IS CONNECTED - nothing
+                # else. (The high-water mark is -1, so a slow reader never
+                # fills anything.) Dropping is right: the next action
+                # supersedes this one anyway.
                 dropped += 1
 
             now = time.perf_counter()
             if now - last_report >= 5.0:
-                print(f"  {sent} sent, {dropped} dropped (no reader) "
+                print(f"  {sent} queued, {dropped} dropped (no peer connected) "
                       f"in {now - last_report:.0f}s", flush=True)
                 sent = dropped = 0
                 last_report = now

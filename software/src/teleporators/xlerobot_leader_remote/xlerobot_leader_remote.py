@@ -16,6 +16,8 @@ from typing import Any
 
 import zmq
 
+from .link import SEQ_KEY, TIME_KEY, tune_socket
+
 from lerobot.utils.errors import DeviceAlreadyConnectedError, DeviceNotConnectedError
 from lerobot.teleoperators.teleoperator import Teleoperator
 
@@ -52,6 +54,9 @@ class XLerobotLeaderRemote(Teleoperator):
         self._stop = threading.Event()
 
         self._lock = threading.Lock()
+        self._last_seq: int | None = None
+        self._seq_gaps = 0
+        self._last_delay_ms: float | None = None
         self._action: dict[str, Any] | None = None
         self._action_time: float = 0.0
 
@@ -108,6 +113,7 @@ class XLerobotLeaderRemote(Teleoperator):
         # Must be set before connect(), and keeps only the newest message.
         self._sock.setsockopt(zmq.CONFLATE, 1)
         self._sock.setsockopt(zmq.RCVTIMEO, 100)
+        tune_socket(self._sock)  # TOS, heartbeats, keepalive - see link.py
         self._sock.connect(addr)
 
         self._stop.clear()
@@ -161,10 +167,27 @@ class XLerobotLeaderRemote(Teleoperator):
                 continue
 
             try:
-                action = {k: float(v) for k, v in json.loads(msg).items()}
+                raw = json.loads(msg)
+                action = {k: float(v) for k, v in raw.items() if not k.startswith("_")}
             except (ValueError, TypeError, AttributeError) as e:
                 logger.error("Malformed action message dropped: %s", e)
                 continue
+
+            # Link diagnostics, from the keys the host adds. A gap in the
+            # sequence is a message that was conflated away or lost; the
+            # delay is send-time to arrival on two different clocks, so it
+            # is only meaningful to within their offset - but a CHANGE in it
+            # is real, and that is what a stall looks like from here.
+            seq = raw.get(SEQ_KEY)
+            sent_at = raw.get(TIME_KEY)
+            now_wall = time.time()
+            if isinstance(seq, (int, float)):
+                seq = int(seq)
+                if self._last_seq is not None and seq - self._last_seq > 1:
+                    self._seq_gaps += seq - self._last_seq - 1
+                self._last_seq = seq
+            if isinstance(sent_at, (int, float)):
+                self._last_delay_ms = (now_wall - sent_at) * 1000.0
 
             with self._lock:
                 self._action = action
@@ -196,13 +219,15 @@ class XLerobotLeaderRemote(Teleoperator):
             now = time.perf_counter()
             if not self._stale or now - self._last_stale_log > self.config.stale_log_interval_s:
                 logger.warning(
-                    "Leader link stalled: last action %.0fms ago%s",
+                    "Leader link stalled: last action %.0fms ago%s (seq gaps so far: %d)",
                     age_ms,
                     " - base stopped, arms holding" if self.config.stop_base_when_stale else "",
+                    self._seq_gaps,
                 )
                 self._last_stale_log = now
         elif self._stale:
-            logger.info("Leader link recovered (%.0fms)", age_ms)
+            delay = f", apparent one-way delay {self._last_delay_ms:.0f}ms" if self._last_delay_ms is not None else ""
+            logger.info("Leader link recovered (%.0fms%s)", age_ms, delay)
         self._stale = stale
 
         return action
