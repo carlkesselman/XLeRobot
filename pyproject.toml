@@ -62,6 +62,27 @@ mecanum = ["lerobot_robot_xlerobot_mecanum"]
 vr = ["lerobot_teleoperator_xlerobot_vr"]
 dataset = ["lerobot[dataset]"]
 
+# GPU torch for the Jetson:  uv sync --extra jetson
+#
+# On JetPack 7 the Orin uses the STOCK upstream aarch64 CUDA wheels - NVIDIA
+# confirmed Orin can take the SBSA package, so the old ritual of hunting
+# NVIDIA forum wheels is over, and the jetson-ai-lab jp6/cu126 index does
+# NOT work here. cu132 matches elroy's CUDA 13.2 / driver 595.78 exactly.
+#
+# Why an EXTRA and not a marker: rosie is aarch64 linux too. No environment
+# marker can tell a Jetson from a Raspberry Pi, so nothing uv can evaluate
+# automatically will do it. Plain `uv sync` therefore gives CPU torch
+# everywhere, and only elroy adds --extra jetson.
+#
+# Why declared here at all, rather than a `uv pip install` after syncing:
+# `uv sync` makes the environment match the lock, so a hand-installed torch
+# is silently replaced by the CPU build on the next sync - and nothing tells
+# you. Inference just gets slow.
+jetson = [
+    "torch",
+    "torchvision",
+]
+
 [tool.uv]
 # Virtual: declare the environment, don't build or install this directory.
 package = false
@@ -78,6 +99,10 @@ members = ["software/plugins/*"]
 # repos are siblings. Override by moving the checkout, not by editing this.
 lerobot = { path = "../lerobot", editable = true }
 
+# Only when --extra jetson is on; otherwise torch comes from PyPI (CPU).
+torch = [{ index = "pytorch-cu132", extra = "jetson" }]
+torchvision = [{ index = "pytorch-cu132", extra = "jetson" }]
+
 # Plugins resolve from this workspace rather than from an index.
 xlerobot_model = { workspace = true }
 lerobot_robot_xlerobot = { workspace = true }
@@ -87,3 +112,10 @@ lerobot_teleoperator_xlerobot_vr = { workspace = true }
 lerobot_robot_xlerobot_2wheels_odrive = { workspace = true }
 lerobot_teleoperator_xlerobot_leader_gamepad = { workspace = true }
 lerobot_teleoperator_xlerobot_leader_remote = { workspace = true }
+
+# explicit = true keeps this index to the packages pinned to it above,
+# rather than letting it answer for everything.
+[[tool.uv.index]]
+name = "pytorch-cu132"
+url = "https://download.pytorch.org/whl/cu132"
+explicit = true
