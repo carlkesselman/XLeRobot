@@ -37,6 +37,19 @@ from .config_xlerobot import XLerobotConfig
 
 logger = logging.getLogger(__name__)
 
+# Seventeen servos daisy-chained at 1 Mbaud drop a packet occasionally. A
+# dropped reply is not a fault - it is the medium - but lerobot's
+# enable_torque/disable_torque default to num_retry=0, so one lost status
+# packet during configure() aborts the whole connect with
+#
+#   Failed to write 'Torque_Enable' on id_=6 ... There is no status packet!
+#
+# Measured before adding this: every motor answers, the supply holds 12.0 V
+# with zero sag under progressive load, and the same write succeeds with
+# retries on the same motor seconds later. stop_base() upstream already
+# uses num_retry=5 for the same reason.
+BUS_RETRY = 3
+
 
 class XLerobot(Robot):
     """
@@ -312,44 +325,44 @@ class XLerobot(Robot):
         # and torque can be safely disabled to run calibration
         
         # bus 1
-        self.bus1.disable_torque()
+        self.bus1.disable_torque(num_retry=BUS_RETRY)
         self.bus1.configure_motors()
 
         # bus 2
-        self.bus2.disable_torque()
+        self.bus2.disable_torque(num_retry=BUS_RETRY)
         self.bus2.configure_motors()
         
         
         for name in self.left_arm_motors:
-            self.bus1.write("Operating_Mode", name, OperatingMode.POSITION.value)
+            self.bus1.write("Operating_Mode", name, OperatingMode.POSITION.value, num_retry=BUS_RETRY)
             # Set P_Coefficient to lower value to avoid shakiness (Default is 32)
-            self.bus1.write("P_Coefficient", name, 16)
+            self.bus1.write("P_Coefficient", name, 16, num_retry=BUS_RETRY)
             # Set I_Coefficient and D_Coefficient to default value 0 and 32
-            self.bus1.write("I_Coefficient", name, 0)
-            self.bus1.write("D_Coefficient", name, 43)
+            self.bus1.write("I_Coefficient", name, 0, num_retry=BUS_RETRY)
+            self.bus1.write("D_Coefficient", name, 43, num_retry=BUS_RETRY)
         
         for name in self.head_motors:
-            self.bus1.write("Operating_Mode", name, OperatingMode.POSITION.value)
+            self.bus1.write("Operating_Mode", name, OperatingMode.POSITION.value, num_retry=BUS_RETRY)
             # Set P_Coefficient to lower value to avoid shakiness (Default is 32)
-            self.bus1.write("P_Coefficient", name, 16)
+            self.bus1.write("P_Coefficient", name, 16, num_retry=BUS_RETRY)
             # Set I_Coefficient and D_Coefficient to default value 0 and 32
-            self.bus1.write("I_Coefficient", name, 0)
-            self.bus1.write("D_Coefficient", name, 43)
+            self.bus1.write("I_Coefficient", name, 0, num_retry=BUS_RETRY)
+            self.bus1.write("D_Coefficient", name, 43, num_retry=BUS_RETRY)
         
         for name in self.right_arm_motors:
-            self.bus2.write("Operating_Mode", name, OperatingMode.POSITION.value)
+            self.bus2.write("Operating_Mode", name, OperatingMode.POSITION.value, num_retry=BUS_RETRY)
             # Set P_Coefficient to lower value to avoid shakiness (Default is 32)
-            self.bus2.write("P_Coefficient", name, 16)
+            self.bus2.write("P_Coefficient", name, 16, num_retry=BUS_RETRY)
             # Set I_Coefficient and D_Coefficient to default value 0 and 32
-            self.bus2.write("I_Coefficient", name, 0)
-            self.bus2.write("D_Coefficient", name, 43)
+            self.bus2.write("I_Coefficient", name, 0, num_retry=BUS_RETRY)
+            self.bus2.write("D_Coefficient", name, 43, num_retry=BUS_RETRY)
         
         for name in self.base_motors:
-            self.bus2.write("Operating_Mode", name, OperatingMode.VELOCITY.value)
+            self.bus2.write("Operating_Mode", name, OperatingMode.VELOCITY.value, num_retry=BUS_RETRY)
         
         
-        self.bus1.enable_torque()
-        self.bus2.enable_torque()
+        self.bus1.enable_torque(num_retry=BUS_RETRY)
+        self.bus2.enable_torque(num_retry=BUS_RETRY)
         
 
     def setup_motors(self) -> None:
