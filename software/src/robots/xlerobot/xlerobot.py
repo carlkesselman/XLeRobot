@@ -385,6 +385,10 @@ class XLerobot(Robot):
             # Set I_Coefficient and D_Coefficient to default value 0 and 32
             self.bus1.write("I_Coefficient", name, 0, num_retry=BUS_RETRY)
             self.bus1.write("D_Coefficient", name, 43, num_retry=BUS_RETRY)
+            # Cap the ramp, which caps the inrush. See the config for why.
+            self.bus1.write(
+                "Acceleration", name, self.config.arm_acceleration, normalize=False, num_retry=BUS_RETRY
+            )
         
         for name in self.head_motors:
             self.bus1.write("Operating_Mode", name, OperatingMode.POSITION.value, num_retry=BUS_RETRY)
@@ -412,6 +416,10 @@ class XLerobot(Robot):
             # Set I_Coefficient and D_Coefficient to default value 0 and 32
             self.bus2.write("I_Coefficient", name, 0, num_retry=BUS_RETRY)
             self.bus2.write("D_Coefficient", name, 43, num_retry=BUS_RETRY)
+            # Cap the ramp, which caps the inrush. See the config for why.
+            self.bus2.write(
+                "Acceleration", name, self.config.arm_acceleration, normalize=False, num_retry=BUS_RETRY
+            )
         
         for name in self.base_motors:
             self.bus2.write("Operating_Mode", name, OperatingMode.VELOCITY.value, num_retry=BUS_RETRY)

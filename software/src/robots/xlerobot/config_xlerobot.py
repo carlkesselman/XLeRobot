@@ -83,6 +83,22 @@ class XLerobotConfig(RobotConfig):
     head_goal_velocity: int = 600
     head_acceleration: int = 40
 
+    # --- arm acceleration, which is also the inrush limit -------------------
+    # configure_motors() leaves the arm servos at Acceleration=254, the
+    # maximum. The first send_action() of a session hands all twelve arm
+    # servos a goal at once - the followers snap to wherever the leaders
+    # happen to be - and twelve STS3215s starting simultaneously from rest
+    # at maximum acceleration is the largest current spike this robot can
+    # produce. On a shared supply it is also how both buses went silent on
+    # the first tick of a run: the socket tripped, not sagged.
+    #
+    # Acceleration is in units of 100 steps/s^2. 100 (= 10 000 steps/s^2)
+    # reaches full speed in ~0.3 s, which tracks a human hand without
+    # feeling slow, while spreading each servo's start-up current over
+    # tens of milliseconds instead of a few. Lower is gentler on the
+    # supply and softer to drive; 254 is the old behaviour.
+    arm_acceleration: int = 100
+
     teleop_keys: dict[str, str] = field(
         default_factory=lambda: {
             # Movement
