@@ -74,8 +74,14 @@ On the operator machine, `--robot.type=xlerobot_2wheels_odrive_client` with
 ## Install
 
 ```bash
-uv sync --group odrive          # from the XLeRobot workspace root
+uv sync                         # from the XLeRobot workspace root
 ```
 
-Not a default dependency: it pulls the `odrive` package, which is only useful
-with the board attached.
+A default dependency since the ODrive base became the standard cart base
+(2026-10-11); it pulls the `odrive` package. On elroy install
+`config/99-odrive-elroy.rules` (lerobot repo) so the board enumerates
+without sudo.
+
+## ODESC board wiring
+
+Vendor wiring diagram: [odesc-wiring-diagram.png](odesc-wiring-diagram.png). Battery terminals on the left edge (upper = +); top edge left to right is M1, brake resistor, M0; Hall sensors go to the bottom-right encoder header (M1_A/B/Z and M0_A/B/Z with their own 5V and GND).
