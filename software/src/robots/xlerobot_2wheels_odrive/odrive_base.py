@@ -73,6 +73,10 @@ class ODriveBase:
         self.right: Any = None
         self._connected = False
 
+        # Re-arm bookkeeping. See _ensure_closed_loop().
+        self._last_rearm = 0.0
+        self._rearms = 0
+
     @property
     def is_connected(self) -> bool:
         return self._connected
@@ -86,7 +90,6 @@ class ODriveBase:
         try:
             import odrive
             from odrive.enums import (
-                AXIS_STATE_CLOSED_LOOP_CONTROL,
                 CONTROL_MODE_VELOCITY_CONTROL,
                 INPUT_MODE_PASSTHROUGH,
             )
@@ -116,24 +119,13 @@ class ODriveBase:
         )
 
         for axis in (self.left, self.right):
-            axis.clear_errors()
-        time.sleep(0.2)
-
-        for axis in (self.left, self.right):
             axis.controller.config.control_mode = CONTROL_MODE_VELOCITY_CONTROL
             axis.controller.config.input_mode = INPUT_MODE_PASSTHROUGH
             # The robot's own control loop is the watchdog; ODrive's would trip
             # on any pause in the lerobot loop.
             axis.config.enable_watchdog = False
 
-        for axis in (self.left, self.right):
-            axis.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
-        time.sleep(0.5)
-
-        errors = {
-            "left": getattr(self.left, "error", 0),
-            "right": getattr(self.right, "error", 0),
-        }
+        errors = self._enter_closed_loop(settle_s=0.5)
         if any(errors.values()):
             raise ConnectionError(
                 f"ODrive axes reported errors after entering closed loop: "
@@ -142,6 +134,86 @@ class ODriveBase:
             )
 
         self._connected = True
+
+    def _enter_closed_loop(self, settle_s: float, clear_sleep_s: float = 0.2) -> dict[str, int]:
+        """Clear errors, request closed loop on both axes, return their error words.
+
+        connect() can afford to wait for the board to settle. The re-arm path
+        runs INSIDE the control loop's read and must not: it passes zero for
+        both sleeps and lets the next tick observe the result.
+        """
+        from odrive.enums import AXIS_STATE_CLOSED_LOOP_CONTROL
+
+        for axis in (self.left, self.right):
+            axis.clear_errors()
+        if clear_sleep_s:
+            time.sleep(clear_sleep_s)
+        for axis in (self.left, self.right):
+            axis.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
+        if settle_s:
+            time.sleep(settle_s)
+        return {
+            "left": getattr(self.left, "error", 0),
+            "right": getattr(self.right, "error", 0),
+        }
+
+    # Re-arm no more often than this, so a board that keeps faulting is not
+    # hammered with requests at the control rate.
+    REARM_INTERVAL_S = 2.0
+
+    def _ensure_closed_loop(self) -> None:
+        """Put the axes back into closed loop if something knocked them out.
+
+        An ODrive that loses its DC bus and gets it back - a low-voltage
+        disconnect module tripping and auto-reconnecting near the end of a
+        pack, a battery contact bouncing - boots to IDLE. USB comes back,
+        reads answer, input_vel is accepted and ignored: a base that is
+        silently dead with no error anywhere. The board's own undervoltage
+        trip and any fault it latches (overvoltage during regen, say) leave
+        it in IDLE the same way.
+
+        Called from the read path, which runs every tick, so it is also the
+        detector. One attempt per REARM_INTERVAL_S, with a log line, so a
+        genuinely broken axis shows up in the log as a repeating re-arm
+        rather than as a mystery.
+        """
+        from odrive.enums import AXIS_STATE_CLOSED_LOOP_CONTROL
+
+        states = {
+            "left": getattr(self.left, "current_state", None),
+            "right": getattr(self.right, "current_state", None),
+        }
+        if all(st == AXIS_STATE_CLOSED_LOOP_CONTROL for st in states.values()):
+            return
+
+        now = time.monotonic()
+        if now - self._last_rearm < self.REARM_INTERVAL_S:
+            return
+        self._last_rearm = now
+        self._rearms += 1
+
+        errors_before = {
+            "left": getattr(self.left, "error", 0),
+            "right": getattr(self.right, "error", 0),
+        }
+        logger.warning(
+            "ODrive axes out of closed loop (states %s, errors %s, vbus %.1fV) - re-arming (#%d)",
+            states,
+            {k: hex(v) for k, v in errors_before.items()},
+            getattr(self.odrv, "vbus_voltage", float("nan")),
+            self._rearms,
+        )
+        # No sleeps: this is the control loop's read path. A few USB
+        # transactions, then the next tick sees whether it took.
+        errors = self._enter_closed_loop(settle_s=0.0, clear_sleep_s=0.0)
+        if any(errors.values()):
+            logger.warning(
+                "ODrive re-arm left errors %s; will retry in %.0fs",
+                {k: hex(v) for k, v in errors.items()},
+                self.REARM_INTERVAL_S,
+            )
+        else:
+            logger.info("ODrive re-arm requested; next read confirms")
 
     def send_body_velocity(self, x_mps: float, theta_degps: float) -> None:
         """Command a body velocity. x in m/s, theta in deg/s (positive = left turn)."""
@@ -170,6 +242,10 @@ class ODriveBase:
         """Measured body velocity as {"x.vel": m/s, "theta.vel": deg/s}."""
         if not self._connected:
             raise ConnectionError("ODriveBase is not connected")
+
+        # Every tick: if the board rebooted or faulted out of closed loop,
+        # get it back before reporting a velocity nobody is controlling.
+        self._ensure_closed_loop()
 
         left_mps = self.left.encoder.vel_estimate * self.wheel_circumference
         right_mps = self.right.encoder.vel_estimate * self.wheel_circumference
