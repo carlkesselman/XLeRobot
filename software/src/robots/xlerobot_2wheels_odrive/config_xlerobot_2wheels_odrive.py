@@ -19,6 +19,7 @@ from lerobot.cameras.opencv.configuration_opencv import OpenCVCameraConfig
 from lerobot.cameras.realsense import RealSenseCamera, RealSenseCameraConfig
 
 from lerobot.robots.config import RobotConfig
+from lerobot_robot_xlerobot.config_xlerobot import XLerobotConfig
 
 
 def xlerobot_2wheels_cameras_config() -> dict[str, CameraConfig]:
@@ -49,21 +50,14 @@ def xlerobot_2wheels_cameras_config() -> dict[str, CameraConfig]:
 
 @RobotConfig.register_subclass("xlerobot_2wheels_odrive")
 @dataclass
-class XLerobot2WheelsODriveConfig(RobotConfig):
-    
-    port1: str = "/dev/ttyACM0"  # port to connect to the bus (so101 + head camera)
-    port2: str = "/dev/ttyACM1"  # right arm only - the wheels are on the ODrive, not this bus
-    disable_torque_on_disconnect: bool = True
+class XLerobot2WheelsODriveConfig(XLerobotConfig):
+    """XLerobotConfig plus the ODrive. Arms, head, cameras, servo profiles and
+    the safety fields are inherited, so a knob added to the parent exists here.
 
-    # `max_relative_target` limits the magnitude of the relative positional target vector for safety purposes.
-    # Set this to a positive scalar to have the same value for all motors, or a list that is the same length as
-    # the number of motors in your follower arms.
-    max_relative_target: int | None = None
+    port2 is the right arm only - the wheels are on the ODrive, not that bus.
+    """
 
     cameras: dict[str, CameraConfig] = field(default_factory=xlerobot_2wheels_cameras_config)
-
-    # Set to `True` for backward compatibility with previous policies/dataset
-    use_degrees: bool = False
 
     # Differential drive parameters
     wheel_radius: float = 0.0825  # Wheel radius in metres (165 mm wheel)

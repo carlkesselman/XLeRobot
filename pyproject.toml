@@ -40,6 +40,11 @@ dependencies = [
     # (--robot.type=xlerobot_2wheels / xlerobot_2wheels_client).
     "lerobot_robot_xlerobot_2wheels",
 
+    # 2-wheel brushless base on an ODrive/ODESC over USB
+    # (--robot.type=xlerobot_2wheels_odrive). The default base on this cart
+    # since 2026-10-11; a subclass of the xlerobot robot above.
+    "lerobot_robot_xlerobot_2wheels_odrive",
+
     # Leader arms + gamepad, presented to lerobot as a single teleoperator.
     # Used directly when everything is on one machine, and by the host half
     # of the remote pair below.
@@ -50,12 +55,6 @@ dependencies = [
     # leader_host.py and holds the physical leaders.
     "lerobot_teleoperator_xlerobot_leader_remote",
 ]
-
-[dependency-groups]
-# Brushless 2-wheel base on an ODrive. Not a default dependency because it
-# pulls the odrive package, which is only useful with that board attached:
-#   uv sync --group odrive
-odrive = ["lerobot_robot_xlerobot_2wheels_odrive"]
 
 [project.optional-dependencies]
 mecanum = ["lerobot_robot_xlerobot_mecanum"]

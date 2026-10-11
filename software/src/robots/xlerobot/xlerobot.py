@@ -110,34 +110,13 @@ class XLerobot(Robot):
             calibration= calibration1,
         )
         if self.calibration.get("right_arm_shoulder_pan") is not None:
-            calibration2 = {
-                "right_arm_shoulder_pan": self.calibration.get("right_arm_shoulder_pan"),
-                "right_arm_shoulder_lift": self.calibration.get("right_arm_shoulder_lift"),
-                "right_arm_elbow_flex": self.calibration.get("right_arm_elbow_flex"),
-                "right_arm_wrist_flex": self.calibration.get("right_arm_wrist_flex"),
-                "right_arm_wrist_roll": self.calibration.get("right_arm_wrist_roll"),
-                "right_arm_gripper": self.calibration.get("right_arm_gripper"),
-                "base_left_wheel": self.calibration.get("base_left_wheel"),
-                "base_back_wheel": self.calibration.get("base_back_wheel"),
-                "base_right_wheel": self.calibration.get("base_right_wheel"),
-            }
+            bus2_names = list(self._bus2_motors(norm_mode_body))
+            calibration2 = {name: self.calibration.get(name) for name in bus2_names}
         else:
             calibration2 = self.calibration
         self.bus2= FeetechMotorsBus(
             port=self.config.port2,
-            motors={
-                # right arm
-                "right_arm_shoulder_pan": Motor(1, "sts3215", norm_mode_body),
-                "right_arm_shoulder_lift": Motor(2, "sts3215", norm_mode_body),
-                "right_arm_elbow_flex": Motor(3, "sts3215", norm_mode_body),
-                "right_arm_wrist_flex": Motor(4, "sts3215", norm_mode_body),
-                "right_arm_wrist_roll": Motor(5, "sts3215", norm_mode_body),
-                "right_arm_gripper": Motor(6, "sts3215", MotorNormMode.RANGE_0_100),
-                # base
-                "base_left_wheel": Motor(7, "sts3215", MotorNormMode.RANGE_M100_100),
-                "base_back_wheel": Motor(8, "sts3215", MotorNormMode.RANGE_M100_100),
-                "base_right_wheel": Motor(9, "sts3215", MotorNormMode.RANGE_M100_100),
-            },
+            motors=self._bus2_motors(norm_mode_body),
             calibration=calibration2,
         )
         self.left_arm_motors = [motor for motor in self.bus1.motors if motor.startswith("left_arm")]
@@ -152,6 +131,68 @@ class XLerobot(Robot):
         self.cameras = make_cameras_from_configs(config.cameras)
 
     @property
+    # ------------------------------------------------------------------ base
+    #
+    # Everything the base contributes goes through these hooks, so a robot
+    # with a different base - two brushless wheels on an ODrive, say -
+    # subclasses this and overrides only them. The arms, head, cameras,
+    # calibration, bus retries, disconnect ordering and servo profiles are
+    # inherited, and a fix made here is a fix made there. (The ODrive robot
+    # used to be a copy of this file; it had none of the hardening added
+    # since, and that is how two robots drift apart.)
+    #
+    # Defaults below are the three STS3215 omniwheels on bus 2.
+
+    @staticmethod
+    def _bus2_motors(norm_mode_body: MotorNormMode) -> dict[str, Motor]:
+        """Motor table for bus 2. The right arm, plus whatever base lives there."""
+        return {
+            # right arm
+            "right_arm_shoulder_pan": Motor(1, "sts3215", norm_mode_body),
+            "right_arm_shoulder_lift": Motor(2, "sts3215", norm_mode_body),
+            "right_arm_elbow_flex": Motor(3, "sts3215", norm_mode_body),
+            "right_arm_wrist_flex": Motor(4, "sts3215", norm_mode_body),
+            "right_arm_wrist_roll": Motor(5, "sts3215", norm_mode_body),
+            "right_arm_gripper": Motor(6, "sts3215", MotorNormMode.RANGE_0_100),
+            # base
+            "base_left_wheel": Motor(7, "sts3215", MotorNormMode.RANGE_M100_100),
+            "base_back_wheel": Motor(8, "sts3215", MotorNormMode.RANGE_M100_100),
+            "base_right_wheel": Motor(9, "sts3215", MotorNormMode.RANGE_M100_100),
+        }
+
+    @property
+    def _base_state_keys(self) -> tuple[str, ...]:
+        """The base's entries in the observation and action spaces."""
+        return ("x.vel", "y.vel", "theta.vel")
+
+    @property
+    def _base_is_connected(self) -> bool:
+        return True  # the omniwheels ride on bus 2
+
+    def _connect_base(self) -> None:
+        pass  # bus 2 is connected with the arms
+
+    def _disconnect_base(self) -> None:
+        pass
+
+    def _read_base_velocity(self) -> dict[str, float]:
+        """Measured body velocity. Raise ConnectionError if the base did not answer."""
+        wheel_vel = self.bus2.sync_read("Present_Velocity", self.base_motors, num_retry=BUS_RETRY)
+        return self._wheel_raw_to_body(
+            wheel_vel["base_left_wheel"],
+            wheel_vel["base_back_wheel"],
+            wheel_vel["base_right_wheel"],
+        )
+
+    def _send_base_velocity(self, x_mps: float, y_mps: float, theta_degps: float) -> None:
+        wheel_goal = self._body_to_wheel_raw(x_mps, y_mps, theta_degps)
+        if wheel_goal:
+            self.bus2.sync_write("Goal_Velocity", wheel_goal)
+
+    def stop_base(self):
+        self.bus2.sync_write("Goal_Velocity", dict.fromkeys(self.base_motors, 0), num_retry=5)
+        logger.info("Base motors stopped")
+
     def _state_ft(self) -> dict[str, type]:
         return dict.fromkeys(
             (
@@ -169,9 +210,7 @@ class XLerobot(Robot):
                 "right_arm_gripper.pos",
                 "head_motor_1.pos",
                 "head_motor_2.pos",
-                "x.vel",
-                "y.vel",
-                "theta.vel",
+                *self._base_state_keys,
             ),
             float,
         )
@@ -192,8 +231,11 @@ class XLerobot(Robot):
 
     @property
     def is_connected(self) -> bool:
-        return self.bus1.is_connected and self.bus2.is_connected and all(
-            cam.is_connected for cam in self.cameras.values()
+        return (
+            self.bus1.is_connected
+            and self.bus2.is_connected
+            and self._base_is_connected
+            and all(cam.is_connected for cam in self.cameras.values())
         )
 
     def connect(self, calibrate: bool = True) -> None:
@@ -268,6 +310,7 @@ class XLerobot(Robot):
             cam.connect()
 
         self.configure()
+        self._connect_base()
         logger.info(f"{self} connected.")
 
     @property
@@ -637,9 +680,7 @@ class XLerobot(Robot):
             right_arm_pos = self.bus2.sync_read(
                 "Present_Position", self.right_arm_motors, num_retry=BUS_RETRY
             )
-            base_wheel_vel = self.bus2.sync_read(
-                "Present_Velocity", self.base_motors, num_retry=BUS_RETRY
-            )
+            base_vel = self._read_base_velocity()
         except ConnectionError as e:
             self._read_failures += 1
             if self._last_proprio is None or self._read_failures > MAX_CONSECUTIVE_READ_FAILURES:
@@ -649,21 +690,15 @@ class XLerobot(Robot):
                     "%s: state read failed (%d in a row), reusing last good state: %s",
                     self, self._read_failures, e,
                 )
-            bus1_pos, right_arm_pos, base_wheel_vel = self._last_proprio
+            bus1_pos, right_arm_pos, base_vel = self._last_proprio
         else:
             if self._read_failures:
                 logger.info("%s: state reads recovered after %d failure(s)", self, self._read_failures)
             self._read_failures = 0
-            self._last_proprio = (bus1_pos, right_arm_pos, base_wheel_vel)
+            self._last_proprio = (bus1_pos, right_arm_pos, base_vel)
 
         left_arm_pos = {k: bus1_pos[k] for k in self.left_arm_motors}
         head_pos = {k: bus1_pos[k] for k in self.head_motors}
-
-        base_vel = self._wheel_raw_to_body(
-            base_wheel_vel["base_left_wheel"],
-            base_wheel_vel["base_back_wheel"],
-            base_wheel_vel["base_right_wheel"],
-        )
         
         left_arm_state = {f"{k}.pos": v for k, v in left_arm_pos.items()}
         right_arm_state = {f"{k}.pos": v for k, v in right_arm_pos.items()}
@@ -709,11 +744,6 @@ class XLerobot(Robot):
         right_arm_pos = {k: v for k, v in action.items() if k.startswith("right_arm_") and k.endswith(".pos")}
         head_pos = {k: v for k, v in action.items() if k.startswith("head_") and k.endswith(".pos")}
         base_goal_vel = {k: v for k, v in action.items() if k.endswith(".vel")}
-        base_wheel_goal_vel = self._body_to_wheel_raw(
-            base_goal_vel.get("x.vel", 0.0),
-            base_goal_vel.get("y.vel", 0.0),
-            base_goal_vel.get("theta.vel", 0.0),
-        )
         
         
         if self.config.max_relative_target is not None:
@@ -747,18 +777,18 @@ class XLerobot(Robot):
             self.bus2.sync_write("Goal_Position", right_arm_pos_raw)
         if head_pos_raw:
             self.bus1.sync_write("Goal_Position", head_pos_raw)
-        if base_wheel_goal_vel:
-            self.bus2.sync_write("Goal_Velocity", base_wheel_goal_vel)
+        if base_goal_vel:
+            self._send_base_velocity(
+                base_goal_vel.get("x.vel", 0.0),
+                base_goal_vel.get("y.vel", 0.0),
+                base_goal_vel.get("theta.vel", 0.0),
+            )
         return {
             **left_arm_pos,
             **right_arm_pos,
             **head_pos,
             **base_goal_vel,
         }
-
-    def stop_base(self):
-        self.bus2.sync_write("Goal_Velocity", dict.fromkeys(self.base_motors, 0), num_retry=5)
-        logger.info("Base motors stopped")
 
     def disconnect(self):
         """Stop the base, drop torque, release everything. Never refuse.
@@ -776,11 +806,15 @@ class XLerobot(Robot):
         """
         problems: list[str] = []
 
-        if self.bus2.is_connected:
+        if self._base_is_connected and (self.bus2.is_connected or self.base_motors == []):
             try:
                 self.stop_base()
             except Exception as e:  # noqa: BLE001
                 problems.append(f"stop_base: {e}")
+            try:
+                self._disconnect_base()
+            except Exception as e:  # noqa: BLE001
+                problems.append(f"base: {e}")
 
         for name, bus in (("bus1", self.bus1), ("bus2", self.bus2)):
             if bus.is_connected:
