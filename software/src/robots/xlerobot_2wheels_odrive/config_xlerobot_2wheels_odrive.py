@@ -55,9 +55,18 @@ class XLerobot2WheelsODriveConfig(XLerobotConfig):
     the safety fields are inherited, so a knob added to the parent exists here.
 
     port2 is the right arm only - the wheels are on the ODrive, not that bus.
+
+    `base` defaults to "odrive" here, and may also be "omniwheels" or "none":
+    this type can run every configuration the cart has, so one yaml serves
+    all three (`--robot.base=none` on the command line, or BASE=none for the
+    config/ scripts). With a non-ODrive base the ODrive fields below are
+    ignored and the board is never opened.
     """
 
     cameras: dict[str, CameraConfig] = field(default_factory=xlerobot_2wheels_cameras_config)
+
+    base: str = "odrive"
+    _allowed_bases = ("odrive", "omniwheels", "none")
 
     # Differential drive parameters
     wheel_radius: float = 0.0825  # Wheel radius in metres (165 mm wheel)

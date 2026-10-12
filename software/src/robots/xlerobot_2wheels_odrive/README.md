@@ -8,8 +8,26 @@ This is `xlerobot_2wheels` with the base swapped. Arms, head, cameras, the
 action space and the host/client protocol are unchanged, so datasets and
 policies are interchangeable with the Feetech 2-wheel variant.
 
-> **Untested.** Written before the hardware was assembled. Expect to debug it
-> against a real board — start with `software/examples/odrive/test_connection.py`.
+> **Partly tested (2026-10-11).** The ODESC (fw 0.5.1) enumerates, takes its
+> bus-limit config and reads back; nothing with wheels has run yet. Expect
+> to debug the motor side against the real board.
+
+## One type, three bases
+
+`XLerobotConfig.base` picks the cart's configuration and this type accepts
+all three, so one yaml serves every setup and the choice can be made on the
+command line (`--robot.base=none`, or `BASE=none` on the lerobot `config/`
+scripts):
+
+| `base:` | wheels | bus 2 | base features |
+|---|---|---|---|
+| `odrive` (default here) | two brushless on the ODESC, USB | right arm 1-6 | `x.vel`, `theta.vel` |
+| `omniwheels` | three STS3215, ids 7-9 | right arm + wheels | `x.vel`, `y.vel`, `theta.vel` |
+| `none` | — | right arm 1-6 | none; base commands ignored with one warning |
+
+With `omniwheels` or `none` every base hook defers to the parent `XLerobot`
+and the ODrive is never opened. The plain `type: xlerobot` accepts
+`omniwheels` and `none` only.
 
 ## Motor layout
 

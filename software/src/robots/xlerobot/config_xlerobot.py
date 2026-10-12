@@ -55,6 +55,33 @@ class XLerobotConfig(RobotConfig):
     port2: str = "/dev/ttyACM1"  # port to connect to the bus (same as lekiwi setup)
     disable_torque_on_disconnect: bool = True
 
+    # --- which base, if any ------------------------------------------------
+    # The same cart runs in three configurations and this one field picks
+    # between them, so a yaml never needs to change and the choice can be
+    # made on the command line (--robot.base=none):
+    #
+    #   omniwheels  three STS3215 wheels, ids 7-9 on bus 2 (the stock XLeRobot)
+    #   none        arms and head only: no wheel ids on bus 2, no x.vel /
+    #               y.vel / theta.vel in the observation or action, base
+    #               commands from the operator ignored (one warning)
+    #   odrive      two brushless hub wheels on an ODESC/ODrive over USB -
+    #               only with type: xlerobot_2wheels_odrive, which adds the
+    #               wheel geometry and the ODrive fields; see that config
+    #
+    # The dataset's feature set follows this choice, so episodes recorded
+    # under different bases are different datasets.
+    base: str = "omniwheels"
+    _allowed_bases = ("omniwheels", "none")
+
+    def __post_init__(self) -> None:
+        if hasattr(super(), "__post_init__"):
+            super().__post_init__()
+        if self.base not in self._allowed_bases:
+            raise ValueError(
+                f"base={self.base!r} is not one of {self._allowed_bases} for robot type "
+                f"{getattr(self, 'type', type(self).__name__)!r}"
+            )
+
     # `max_relative_target` limits the magnitude of the relative positional target vector for safety purposes.
     # Set this to a positive scalar to have the same value for all motors, or a list that is the same length as
     # the number of motors in your follower arms.

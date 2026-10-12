@@ -130,7 +130,6 @@ class XLerobot(Robot):
         self._read_failures = 0
         self.cameras = make_cameras_from_configs(config.cameras)
 
-    @property
     # ------------------------------------------------------------------ base
     #
     # Everything the base contributes goes through these hooks, so a robot
@@ -141,12 +140,18 @@ class XLerobot(Robot):
     # used to be a copy of this file; it had none of the hardening added
     # since, and that is how two robots drift apart.)
     #
-    # Defaults below are the three STS3215 omniwheels on bus 2.
+    # Defaults below are the three STS3215 omniwheels on bus 2, or no base at
+    # all when config.base == "none": then bus 2 carries the right arm only,
+    # the base contributes no features, and base commands are dropped with
+    # a single warning.
 
-    @staticmethod
-    def _bus2_motors(norm_mode_body: MotorNormMode) -> dict[str, Motor]:
+    @property
+    def _has_servo_base(self) -> bool:
+        return self.config.base == "omniwheels"
+
+    def _bus2_motors(self, norm_mode_body: MotorNormMode) -> dict[str, Motor]:
         """Motor table for bus 2. The right arm, plus whatever base lives there."""
-        return {
+        motors = {
             # right arm
             "right_arm_shoulder_pan": Motor(1, "sts3215", norm_mode_body),
             "right_arm_shoulder_lift": Motor(2, "sts3215", norm_mode_body),
@@ -154,20 +159,23 @@ class XLerobot(Robot):
             "right_arm_wrist_flex": Motor(4, "sts3215", norm_mode_body),
             "right_arm_wrist_roll": Motor(5, "sts3215", norm_mode_body),
             "right_arm_gripper": Motor(6, "sts3215", MotorNormMode.RANGE_0_100),
-            # base
-            "base_left_wheel": Motor(7, "sts3215", MotorNormMode.RANGE_M100_100),
-            "base_back_wheel": Motor(8, "sts3215", MotorNormMode.RANGE_M100_100),
-            "base_right_wheel": Motor(9, "sts3215", MotorNormMode.RANGE_M100_100),
         }
+        if self._has_servo_base:
+            motors.update({
+                "base_left_wheel": Motor(7, "sts3215", MotorNormMode.RANGE_M100_100),
+                "base_back_wheel": Motor(8, "sts3215", MotorNormMode.RANGE_M100_100),
+                "base_right_wheel": Motor(9, "sts3215", MotorNormMode.RANGE_M100_100),
+            })
+        return motors
 
     @property
     def _base_state_keys(self) -> tuple[str, ...]:
         """The base's entries in the observation and action spaces."""
-        return ("x.vel", "y.vel", "theta.vel")
+        return ("x.vel", "y.vel", "theta.vel") if self._has_servo_base else ()
 
     @property
     def _base_is_connected(self) -> bool:
-        return True  # the omniwheels ride on bus 2
+        return True  # the omniwheels ride on bus 2; no base is always "connected"
 
     def _connect_base(self) -> None:
         pass  # bus 2 is connected with the arms
@@ -177,6 +185,8 @@ class XLerobot(Robot):
 
     def _read_base_velocity(self) -> dict[str, float]:
         """Measured body velocity. Raise ConnectionError if the base did not answer."""
+        if not self._has_servo_base:
+            return {}
         wheel_vel = self.bus2.sync_read("Present_Velocity", self.base_motors, num_retry=BUS_RETRY)
         return self._wheel_raw_to_body(
             wheel_vel["base_left_wheel"],
@@ -185,14 +195,29 @@ class XLerobot(Robot):
         )
 
     def _send_base_velocity(self, x_mps: float, y_mps: float, theta_degps: float) -> None:
+        if not self._has_servo_base:
+            self._warn_no_base(x_mps, y_mps, theta_degps)
+            return
         wheel_goal = self._body_to_wheel_raw(x_mps, y_mps, theta_degps)
         if wheel_goal:
             self.bus2.sync_write("Goal_Velocity", wheel_goal)
 
     def stop_base(self):
+        if not self.base_motors:
+            return
         self.bus2.sync_write("Goal_Velocity", dict.fromkeys(self.base_motors, 0), num_retry=5)
         logger.info("Base motors stopped")
 
+    def _warn_no_base(self, *vel: float) -> None:
+        """base: none, but the operator is sending base commands. Say so once."""
+        if any(abs(v) > 1e-6 for v in vel) and not getattr(self, "_warned_no_base", False):
+            self._warned_no_base = True
+            logger.warning(
+                "%s has no base (base: none) but received a nonzero base command; "
+                "ignoring these. The operator config is still emitting them.", self
+            )
+
+    @property
     def _state_ft(self) -> dict[str, type]:
         return dict.fromkeys(
             (
@@ -619,6 +644,8 @@ class XLerobot(Robot):
         }  # m/s and deg/s
     
     def _from_keyboard_to_base_action(self, pressed_keys: np.ndarray):
+        if not self._base_state_keys:
+            return {}
         # Speed control
         if self.teleop_keys["speed_up"] in pressed_keys:
             self.speed_index = min(self.speed_index + 1, 2)
@@ -744,6 +771,12 @@ class XLerobot(Robot):
         right_arm_pos = {k: v for k, v in action.items() if k.startswith("right_arm_") and k.endswith(".pos")}
         head_pos = {k: v for k, v in action.items() if k.startswith("head_") and k.endswith(".pos")}
         base_goal_vel = {k: v for k, v in action.items() if k.endswith(".vel")}
+        if not self._base_state_keys and base_goal_vel:
+            # No base: the keys are not features, so they are not echoed
+            # back either - the recorder would otherwise see a column that
+            # the dataset does not have.
+            self._warn_no_base(*base_goal_vel.values())
+            base_goal_vel = {}
         
         
         if self.config.max_relative_target is not None:

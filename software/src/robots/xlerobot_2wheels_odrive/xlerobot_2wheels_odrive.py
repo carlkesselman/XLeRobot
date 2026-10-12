@@ -20,6 +20,10 @@ motion profiles - is inherited from :class:`XLerobot`. This class overrides
 only the base hooks, so the two robots cannot drift apart: a fix in the
 parent is a fix here.
 
+The hooks apply only when ``config.base == "odrive"``. With ``omniwheels`` or
+``none`` every hook defers to the parent, so this one robot type runs all
+three of the cart's configurations from one yaml.
+
 (This file used to be a 500-line copy of the parent with the base swapped.
 It had none of the hardening the parent gained afterwards.)
 
@@ -30,7 +34,6 @@ import logging
 
 import numpy as np
 
-from lerobot.motors import Motor, MotorNormMode
 from lerobot_robot_xlerobot.xlerobot import XLerobot
 
 from .config_xlerobot_2wheels_odrive import XLerobot2WheelsODriveConfig
@@ -48,6 +51,7 @@ class XLerobot2WheelsODrive(XLerobot):
         # because the parent consults the hooks below while building its
         # motor tables, and because a failed parent __init__ still leaves a
         # disconnect() that touches self.base.
+        self._odrive = config.base == "odrive"
         self.base = ODriveBase(
             wheel_radius=config.wheel_radius,
             wheelbase=config.wheelbase,
@@ -56,26 +60,22 @@ class XLerobot2WheelsODrive(XLerobot):
             max_linear_mps=config.max_linear_mps,
             connect_timeout_s=config.odrive_connect_timeout_s,
             serial_number=config.odrive_serial_number,
-        )
+        ) if self._odrive else None
         super().__init__(config)
         self.config: XLerobot2WheelsODriveConfig = config
 
     # ------------------------------------------------------------- base hooks
+    #
+    # Each defers to the parent unless the ODrive is the configured base.
 
-    @staticmethod
-    def _bus2_motors(norm_mode_body: MotorNormMode) -> dict[str, Motor]:
-        """Bus 2 is the right arm only; the wheels are on the ODrive."""
-        return {
-            "right_arm_shoulder_pan": Motor(1, "sts3215", norm_mode_body),
-            "right_arm_shoulder_lift": Motor(2, "sts3215", norm_mode_body),
-            "right_arm_elbow_flex": Motor(3, "sts3215", norm_mode_body),
-            "right_arm_wrist_flex": Motor(4, "sts3215", norm_mode_body),
-            "right_arm_wrist_roll": Motor(5, "sts3215", norm_mode_body),
-            "right_arm_gripper": Motor(6, "sts3215", MotorNormMode.RANGE_0_100),
-        }
+    # _bus2_motors is not overridden: the parent adds wheel ids to bus 2 only
+    # for base == "omniwheels", so with the ODrive the bus carries the right
+    # arm alone, as it should. One source of truth for the right arm.
 
     @property
     def _base_state_keys(self) -> tuple[str, ...]:
+        if not self._odrive:
+            return super()._base_state_keys
         # No y.vel: a differential drive cannot strafe. The operator side
         # must not emit one either (emit_y_vel: false in the leader config),
         # or the robot is sent a key it has no feature for.
@@ -83,15 +83,19 @@ class XLerobot2WheelsODrive(XLerobot):
 
     @property
     def _base_is_connected(self) -> bool:
-        return self.base.is_connected
+        return self.base.is_connected if self._odrive else super()._base_is_connected
 
     def _connect_base(self) -> None:
-        self.base.connect()
+        if self._odrive:
+            self.base.connect()
 
     def _disconnect_base(self) -> None:
-        self.base.disconnect()
+        if self._odrive:
+            self.base.disconnect()
 
     def _read_base_velocity(self) -> dict[str, float]:
+        if not self._odrive:
+            return super()._read_base_velocity()
         # The parent's read-retry logic catches ConnectionError, so an ODrive
         # that stops answering mid-run is ridden out on the last good state
         # like a dropped servo packet, rather than ending the episode.
@@ -101,6 +105,8 @@ class XLerobot2WheelsODrive(XLerobot):
             raise ConnectionError(f"ODrive read failed: {e}") from e
 
     def _send_base_velocity(self, x_mps: float, y_mps: float, theta_degps: float) -> None:
+        if not self._odrive:
+            return super()._send_base_velocity(x_mps, y_mps, theta_degps)
         if abs(y_mps) > 1e-6:
             # Tolerated, logged once: a stale operator config still emitting
             # y.vel should be loud but not fatal.
@@ -110,12 +116,16 @@ class XLerobot2WheelsODrive(XLerobot):
         self.base.send_body_velocity(x_mps, theta_degps)
 
     def stop_base(self):
+        if not self._odrive:
+            return super().stop_base()
         self.base.stop()
         logger.info("Base motors stopped")
 
     # -------------------------------------------------------------- keyboard
 
     def _from_keyboard_to_base_action(self, pressed_keys: np.ndarray):
+        if not self._odrive:
+            return super()._from_keyboard_to_base_action(pressed_keys)
         if self.teleop_keys["speed_up"] in pressed_keys:
             self.speed_index = min(self.speed_index + 1, 2)
         if self.teleop_keys["speed_down"] in pressed_keys:
