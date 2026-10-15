@@ -34,6 +34,7 @@ import logging
 
 import numpy as np
 
+from lerobot.utils.constants import HF_LEROBOT_CALIBRATION, ROBOTS
 from lerobot_robot_xlerobot.xlerobot import XLerobot
 
 from .config_xlerobot_2wheels_odrive import XLerobot2WheelsODriveConfig
@@ -47,6 +48,17 @@ class XLerobot2WheelsODrive(XLerobot):
     name = "xlerobot_2wheels_odrive"
 
     def __init__(self, config: XLerobot2WheelsODriveConfig):
+        # Calibration belongs to the arms and head, not the base, and they
+        # are the same servos whichever base is fitted. lerobot files it
+        # under robots/<robot.name>/, so without this the robot looks in
+        # robots/xlerobot_2wheels_odrive/ and finds nothing - the arm
+        # calibration made as `xlerobot` is invisible, every read fails with
+        # "has no calibration registered", and an interactive connect()
+        # offers to recalibrate from scratch. Share the parent's directory
+        # unless the config names one explicitly.
+        if config.calibration_dir is None:
+            config.calibration_dir = HF_LEROBOT_CALIBRATION / ROBOTS / XLerobot.name
+
         # The base object must exist before the parent's __init__ runs,
         # because the parent consults the hooks below while building its
         # motor tables, and because a failed parent __init__ still leaves a
