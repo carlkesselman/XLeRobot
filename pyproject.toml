@@ -80,6 +80,13 @@ dataset = ["lerobot[dataset]"]
 jetson = [
     "torch",
     "torchvision",
+    # torchcodec is compiled against one torch release: 0.11 for torch 2.11,
+    # 0.12 for 2.12. The lerobot fork allows <0.13 on ARM, but one resolution
+    # serves rosie (PyPI torch 2.11) and elroy (cu132 torch 2.12) alike, and
+    # uv kept 0.11.1 for both - which does not load against elroy's torch
+    # ("Could not load libtorchcodec"). Pinning it here, in the extra that
+    # already forks the resolution, gives the Jetson its own.
+    "torchcodec>=0.12,<0.13 ; sys_platform == 'linux' and platform_machine == 'aarch64'",
 ]
 
 [tool.uv]
@@ -92,6 +99,27 @@ python-preference = "managed"
 
 [tool.uv.workspace]
 members = ["software/plugins/*"]
+
+# odrive 0.5.4 is published as source only, and its setup.py imports its own
+# native library to read its version - which refuses to load on macOS
+# ("libfibre is not supported on your platform (Darwin arm64)"). uv has to
+# run that setup.py just to learn odrive's dependencies, so `uv lock` failed
+# on the Mac and could only be run on elroy. Stating the metadata here means
+# uv never builds it to resolve. Read off the installed package on elroy,
+# 2026-10-15: importlib.metadata.requires('odrive').
+[[tool.uv.dependency-metadata]]
+name = "odrive"
+version = "0.5.4"
+requires-dist = [
+    "ipython",
+    "PyUSB",
+    "requests",
+    "IntelHex",
+    "matplotlib",
+    "monotonic",
+    "setuptools",
+    "pywin32>=222; platform_system == 'Windows'",
+]
 
 [tool.uv.sources]
 # The fork. Relative to this file, so it holds on any machine where the two
