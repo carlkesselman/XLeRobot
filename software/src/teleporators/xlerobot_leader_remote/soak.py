@@ -15,7 +15,7 @@ the cart's uplink full of video, does the action stream still arrive every
 back, from the same shell:
 
     1. quiet                - nothing else on the wifi
-    2. under video load     - ./config/video-test.sh <mac-ip> running in
+    2. under video load     - ./config/video.sh synthetic <mac-ip> running in
                               another terminal on the cart for the whole
                               soak; that is the traffic that caused the
                               stalls
