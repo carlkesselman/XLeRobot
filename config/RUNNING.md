@@ -261,7 +261,7 @@ list with `--help`.
 | **data** | |
 | `./config/dataset-check.sh <repo_id>` | read a recording back: frames, features, a decoded frame per camera as PNG, video files. Picks the newest `<repo_id>_<date>_<time>`. |
 | **base** | |
-| `./config/odrive-check.sh` | the ODESC: config vs the bus limits, `--apply` to write them, `--watch` through a power cut. No motors needed. |
+| `./config/odrive-check.sh` | the ODESC: config vs the bus limits, `--apply` to write them, `--watch` through a power cut. Motor bring-up: `--halls` (pole pairs), `--setup-motors`, `--calibrate` (drill pack, wheels up), `--spin --axis N`. |
 | **environment** | |
 | `./config/sync.sh` | sync with the right extras for this machine |
 
