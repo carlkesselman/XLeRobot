@@ -220,8 +220,11 @@ def _clear(o) -> None:
             except Exception:  # noqa: BLE001
                 pass
     try:
+        import contextlib
+        import io
         from odrive.utils import dump_errors
-        dump_errors(o, True)
+        with contextlib.redirect_stdout(io.StringIO()):   # 0.5.1: no clear_errors(); this clears, loudly
+            dump_errors(o, True)
     except Exception:  # noqa: BLE001
         pass
 
@@ -235,9 +238,29 @@ def _axis_errors(ax) -> dict[str, int]:
     }
 
 
+# The 0.5.x codes this bring-up actually meets, so the output says what
+# happened instead of a hex word to look up.
+_ERROR_NAMES = {
+    "axis": {0x1: "INVALID_STATE", 0x40: "MOTOR_FAILED", 0x100: "ENCODER_FAILED",
+             0x200: "CONTROLLER_FAILED", 0x800: "WATCHDOG_TIMER_EXPIRED"},
+    "motor": {0x1: "PHASE_RESISTANCE_OUT_OF_RANGE", 0x2: "PHASE_INDUCTANCE_OUT_OF_RANGE",
+              0x8: "DRV_FAULT", 0x10: "CONTROL_DEADLINE_MISSED", 0x80: "MODULATION_MAGNITUDE",
+              0x400: "CURRENT_SENSE_SATURATION", 0x1000: "CURRENT_LIMIT_VIOLATION"},
+    "encoder": {0x1: "UNSTABLE_GAIN", 0x2: "CPR_POLEPAIRS_MISMATCH", 0x4: "NO_RESPONSE",
+                0x8: "UNSUPPORTED_ENCODER_MODE", 0x10: "ILLEGAL_HALL_STATE",
+                0x20: "INDEX_NOT_FOUND_YET", 0x100: "HALL_NOT_CALIBRATED_YET"},
+}
+
+
 def _fmt_errors(errs: dict[str, int]) -> str:
     bad = {k: v for k, v in errs.items() if v}
-    return "none" if not bad else "  ".join(f"{k} 0x{v:x}" for k, v in bad.items())
+    if not bad:
+        return "none"
+    out = []
+    for k, v in bad.items():
+        names = [n for bit, n in _ERROR_NAMES.get(k, {}).items() if v & bit]
+        out.append(f"{k} 0x{v:x}" + (f" ({', '.join(names)})" if names else ""))
+    return "  ".join(out)
 
 
 def _yes(prompt: str) -> bool:
@@ -380,16 +403,21 @@ def cmd_calibrate(args) -> int:
     hall_pol = _enum("AXIS_STATE_ENCODER_HALL_POLARITY_CALIBRATION", -1)
     offset_cal = _enum("AXIS_STATE_ENCODER_OFFSET_CALIBRATION", 7)
     ok_all = True
+    succeeded = []
     for i, ax in _axes(o, args.axis):
         side = "LEFT" if i == 0 else "RIGHT"
         print(f"\n--- axis{i} ({side}) ---")
         _clear(o)
-        steps = [("motor calibration (beep)", motor_cal)]
+        # (label, state, optional). Hall polarity calibration exists in the
+        # python package's enums but not in every 0.5.x firmware: 0.5.1
+        # answers it with AXIS_ERROR_INVALID_STATE (seen 2026-10-19). Offset
+        # calibration works on Halls without it.
+        steps = [("motor calibration (beep)", motor_cal, False)]
         if hall_pol >= 0:
-            steps.append(("Hall polarity", hall_pol))
-        steps.append(("Hall offset (wheel turns)", offset_cal))
+            steps.append(("Hall polarity", hall_pol, True))
+        steps.append(("Hall offset (wheel turns)", offset_cal, False))
         ok = True
-        for label, state in steps:
+        for label, state, optional in steps:
             print(f"  {label}...", end="", flush=True)
             ax.requested_state = state
             try:
@@ -397,30 +425,54 @@ def cmd_calibrate(args) -> int:
             except TimeoutError as e:
                 print(f" {e}"); ok = False; break
             errs = _axis_errors(ax)
+            if optional and errs["axis"] == 0x1 and not any(v for k, v in errs.items() if k != "axis"):
+                print(" not supported by this firmware - skipped")
+                _clear(o)
+                continue
             print(f" done, vbus min {vmin:.1f} V, errors {_fmt_errors(errs)}")
+            if state == motor_cal:
+                m = ax.motor.config
+                i_cal = getattr(m, "calibration_current", float("nan"))
+                v_max = getattr(m, "resistance_calib_max_voltage", float("nan"))
+                print(f"    measured phase resistance {m.phase_resistance * 1000:.0f} mOhm, "
+                      f"inductance {m.phase_inductance * 1e6:.0f} uH")
+                print(f"    (test current {i_cal:g} A, voltage allowed {v_max:g} V -> "
+                      f"resistance must be under {1000 * v_max / i_cal:.0f} mOhm)")
+                if errs["motor"] & 0x1:
+                    print("    PHASE_RESISTANCE_OUT_OF_RANGE: the test could not drive its current")
+                    print("    within the allowed voltage. An open or loose phase connection reads")
+                    print("    as enormous resistance - check all three screw terminals and any")
+                    print("    extension joints on this wheel. A genuinely high-resistance motor")
+                    print("    instead reads just over the limit (compare with the other wheel).")
             if any(errs.values()):
                 ok = False
                 break
         if ok:
             m = ax.motor.config
-            print(f"  phase resistance {m.phase_resistance * 1000:.0f} mOhm, "
-                  f"inductance {m.phase_inductance * 1e6:.0f} uH, "
-                  f"Hall offset {getattr(ax.encoder.config, 'offset', '?')}")
+            print(f"  Hall offset {getattr(ax.encoder.config, 'offset', '?')}")
             m.pre_calibrated = True
             ax.encoder.config.pre_calibrated = True
+            succeeded.append(i)
             print("  marked pre_calibrated")
         else:
             print("  NOT calibrated. Common causes: a phase lead loose (motor error), Hall")
             print("  wiring or noise (encoder error: ILLEGAL_HALL_STATE, CPR_POLEPAIRS_MISMATCH),")
             print("  wrong pole_pairs, or the supply sagging (DC_BUS_UNDER_VOLTAGE).")
             ok_all = False
-    if ok_all:
-        print("\nsaving (pre_calibrated survives reboot; the robot can now enter closed loop)")
+    if succeeded:
+        # Save whatever passed, so a good wheel is not recalibrated because
+        # the other one failed. A failed axis is simply not pre_calibrated.
+        print(f"\nsaving axis {', '.join(map(str, succeeded))} (pre_calibrated survives reboot)")
         o = _save_and_reboot(o, args.timeout)
         for i, ax in _axes(o, args.axis):
             print(f"  axis{i}: motor pre_calibrated {ax.motor.config.pre_calibrated}, "
                   f"encoder pre_calibrated {ax.encoder.config.pre_calibrated}")
+    if ok_all:
         print("next:  ./config/odrive-check.sh --spin --axis 0   (then --axis 1)")
+    else:
+        failed = [i for i, _ in _axes(o, args.axis) if i not in succeeded]
+        print(f"\nfix axis {', '.join(map(str, failed))} and rerun with --axis "
+              f"{failed[0] if len(failed) == 1 else '0/1'}; the saved one(s) need not be redone.")
     return 0 if ok_all else 1
 
 
