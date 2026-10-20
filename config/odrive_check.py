@@ -25,8 +25,10 @@ on M0_A/B/Z and M1_A/B/Z with their 5V and GND):
     --spin --axis N [--speed 0.5] closed-loop velocity for a few seconds:
                                   commanded vs measured, direction, current
 
-axis0 is the LEFT wheel and axis1 the RIGHT (odrive_base.py). M0 is on the
-right-hand terminal block when the battery terminal is on the left.
+axis0 (M0) is the RIGHT wheel and axis1 (M1) the LEFT (odrive_base.py
+RIGHT_AXIS / LEFT_AXIS). With the battery terminals on the left edge, M0 is
+the right-hand phase block and M1 the left-hand one, so each motor wires
+straight to its own side of the cart.
 
 The limits are the ones recorded in the power doc for firmware 0.5.1, which
 has no enable_brake_resistor: the resistor is in use whenever
@@ -37,6 +39,9 @@ brake_resistance > 0. They are written as a dict so --apply and the report's
 import argparse
 import sys
 import time
+
+# axis -> wheel. Must match RIGHT_AXIS / LEFT_AXIS in odrive_base.py.
+SIDE = {0: "RIGHT", 1: "LEFT"}
 
 TARGET = {
     "brake_resistance": 2.0,                 # the fitted 2 ohm / 50 W
@@ -277,7 +282,7 @@ def cmd_halls(args) -> int:
     print("Hall check. No current flows; the wheels are turned by hand.\n")
     result = {}
     for i, ax in _axes(o, args.axis):
-        side = "LEFT" if i == 0 else "RIGHT"
+        side = SIDE[i]
         ax.encoder.config.mode = hall          # RAM only; --setup-motors saves it
         time.sleep(0.2)
         print(f"axis{i} ({side} wheel). Put a mark on the tyre and line it up with something fixed.")
@@ -405,7 +410,7 @@ def cmd_calibrate(args) -> int:
     ok_all = True
     succeeded = []
     for i, ax in _axes(o, args.axis):
-        side = "LEFT" if i == 0 else "RIGHT"
+        side = SIDE[i]
         print(f"\n--- axis{i} ({side}) ---")
         _clear(o)
         # (label, state, optional). Hall polarity calibration exists in the
@@ -482,7 +487,7 @@ def cmd_spin(args) -> int:
         return 2
     o = _find(args.timeout)
     ax = dict(_axes(o, None))[args.axis]
-    side = "LEFT" if args.axis == 0 else "RIGHT"
+    side = SIDE[args.axis]
     if not _yes(f"Spin axis{args.axis} ({side}) at {args.speed:+g} turns/s for {args.seconds:g} s, wheel clear?"):
         return 1
     closed = _enum("AXIS_STATE_CLOSED_LOOP_CONTROL", 8)

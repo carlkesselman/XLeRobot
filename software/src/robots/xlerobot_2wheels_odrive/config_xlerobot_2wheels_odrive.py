@@ -77,9 +77,11 @@ class XLerobot2WheelsODriveConfig(XLerobotConfig):
     # board (S1/Pro, 0.6+) needs that file rewritten, not this config.
     #
     # The two motors face opposite ways when mounted either side of the
-    # chassis, so one axis must be negated. Which one depends on your wiring
-    # and on how axis0/axis1 are assigned in the board's own config. If
-    # driving forward spins the robot in place instead, flip these.
+    # chassis, so one axis must be negated. Which one depends on the wiring.
+    # axis0 (M0) is the RIGHT wheel and axis1 (M1) the LEFT - see
+    # odrive_base.RIGHT_AXIS / LEFT_AXIS. `config/odrive-check.sh --spin`
+    # shows which way each wheel turns; if driving forward spins the robot
+    # in place instead, flip these.
     invert_left_wheel: bool = True
     invert_right_wheel: bool = False
 

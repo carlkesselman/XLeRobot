@@ -9,7 +9,7 @@ Targets ODrive **v3.x with 0.5.x firmware**, the same API the scripts under
 ``software/examples/odrive/`` use:
 
     odrive.find_any()                              discovery over USB
-    odrv.axis0 / odrv.axis1                        left / right
+    odrv.axis0 / odrv.axis1                        RIGHT / LEFT wheel (M0 / M1)
     axis.controller.config.control_mode            velocity control
     axis.controller.input_vel                      command, in turns/s
     axis.encoder.vel_estimate                      feedback, in turns/s
@@ -30,6 +30,13 @@ import time
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# Which ODrive axis drives which wheel. M0 (axis0) sits at the right-hand end
+# of the board's top edge and M1 (axis1) at the left, so with the board
+# mounted that way round each motor's phase wires go straight to its own side
+# of the cart without crossing. config/odrive_check.py labels axes from these.
+RIGHT_AXIS = 0
+LEFT_AXIS = 1
 
 
 class ODriveBase:
@@ -54,7 +61,8 @@ class ODriveBase:
                 negated. Which one depends on your wiring - if driving forward
                 makes the robot spin in place, flip these. The Feetech variant
                 hard-codes the left wheel inverted; here it is configurable
-                because ODrive axis assignment is set in the board's own config.
+                because it depends on how the phases and Halls were wired.
+                Settle it with `odrive-check.sh --spin`.
             max_linear_mps: per-wheel clamp, a safety limit on a runaway command.
             serial_number: pick a specific board when more than one is attached.
         """
@@ -109,8 +117,9 @@ class ODriveBase:
         except Exception as e:
             raise ConnectionError(f"Could not find an ODrive: {e}") from e
 
-        self.left = self.odrv.axis0
-        self.right = self.odrv.axis1
+        axes = (self.odrv.axis0, self.odrv.axis1)
+        self.left = axes[LEFT_AXIS]
+        self.right = axes[RIGHT_AXIS]
 
         logger.info(
             "ODrive %s connected, vbus %.1fV",

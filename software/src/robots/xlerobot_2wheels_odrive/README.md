@@ -34,7 +34,7 @@ and the ODrive is never opened. The plain `type: xlerobot` accepts
 ```
 bus1 (port1):  left arm 1-6   +  head_motor_1/2 at 7-8      Feetech
 bus2 (port2):  right arm 1-6                                 Feetech
-ODrive:        axis0 = left wheel, axis1 = right wheel       brushless
+ODrive:        axis0 = right wheel, axis1 = left wheel       brushless
 ```
 
 Note bus2 carries **only** the right arm — the wheels are not on the Feetech
@@ -71,8 +71,9 @@ max_linear_mps      = 1.0      # per-wheel clamp, safety
 
 **The inversion flags are the thing to get wrong.** The two motors face
 opposite directions mounted either side of the chassis, so exactly one axis
-must be negated — which one depends on your wiring and on how axis0/axis1 are
-assigned in the board's own configuration.
+must be negated — which one depends on the wiring (axis0/M0 = right,
+axis1/M1 = left). `config/odrive-check.sh --spin --axis N` shows which way
+each wheel turns for a positive command.
 
 If driving forward makes the robot **spin in place**, and turning makes it
 **drive straight**, the flags are wrong. Flip them.
@@ -103,3 +104,5 @@ without sudo.
 ## ODESC board wiring
 
 Vendor wiring diagram: [odesc-wiring-diagram.png](odesc-wiring-diagram.png). Battery terminals on the left edge (upper = +); top edge left to right is M1, brake resistor, M0; Hall sensors go to the bottom-right encoder header (M1_A/B/Z and M0_A/B/Z with their own 5V and GND).
+
+**Wheel assignment: M0 = RIGHT wheel, M1 = LEFT wheel.** Mount the board with M0 toward the cart's right side; each motor's phases and Halls then run to the board on its own side with no crossover. The code follows this (`RIGHT_AXIS = 0`, `LEFT_AXIS = 1` in `odrive_base.py`).

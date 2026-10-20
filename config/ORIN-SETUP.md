@@ -283,7 +283,7 @@ The robot type is `xlerobot_2wheels_odrive` (a subclass of `xlerobot`; same
 calibration file, since the wheels are not in it). Bus 2 carries the right
 arm only. The operator's `emit_y_vel` must be `false` — a differential
 drive has no sideways axis. `odrive_base.py` assumes 0.5.x firmware with
-`axis0` = left and `axis1` = right; if forward drives a circle, flip
+`axis0` (M0) = right and `axis1` (M1) = left; if forward drives a circle, flip
 `invert_left_wheel` / `invert_right_wheel` in the yaml.
 
 ### RealSense permissions
