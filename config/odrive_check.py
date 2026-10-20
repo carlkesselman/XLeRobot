@@ -90,6 +90,48 @@ def cmd_report(args) -> int:
     return 0 if ok else 1
 
 
+def _uptime_ms(o):
+    stats = getattr(o, "system_stats", None)
+    return getattr(stats, "uptime", None) if stats is not None else None
+
+
+def _save_and_reboot(o, timeout: float):
+    """Save to flash, reboot, and PROVE both happened. Returns the fresh board.
+
+    The first version of --apply (2026-10-11) called save_configuration(),
+    ignored what it returned, swallowed the reboot's exception, and re-read
+    the settings - from RAM, on a board that had not necessarily saved or
+    rebooted. It printed "applied and verified." On 2026-10-19 the board
+    reported factory bus limits. So: check save's return value, and accept
+    the reboot only if the board's uptime went back to near zero.
+    """
+    saved = o.save_configuration()
+    if saved is False:
+        raise RuntimeError(
+            "save_configuration() returned False - nothing was written to flash. "
+            "On 0.5.x that usually means an axis was not IDLE.")
+    before = _uptime_ms(o)
+    print("saved. rebooting - the USB device goes away for a few seconds, which is normal.")
+    try:
+        o.reboot()
+    except Exception:  # noqa: BLE001 - the reboot tears the connection down
+        pass
+    time.sleep(3.0)
+    fresh = _find(max(timeout, 20.0))
+    after = _uptime_ms(fresh)
+    if before is not None and after is not None:
+        if after >= before:
+            raise RuntimeError(
+                f"the board did not reboot (uptime {after} ms, was {before} ms) - the "
+                "settings read back next would come from RAM, not flash. Power-cycle it "
+                "and run this again.")
+        print(f"rebooted (uptime {after} ms).")
+    else:
+        print("rebooted (this firmware does not report uptime, so not independently confirmed:")
+        print("power-cycle the board and run the plain report to be sure the values stuck).")
+    return fresh
+
+
 def cmd_apply(args) -> int:
     o = _find(args.timeout)
     print(f"serial {o.serial_number}, vbus {o.vbus_voltage:.2f} V - writing bus limits")
@@ -99,15 +141,8 @@ def cmd_apply(args) -> int:
             continue
         setattr(o.config, k, v)
         print(f"  {k} = {v}")
-    o.save_configuration()
-    print("saved. rebooting - the USB device goes away for a few seconds, which is normal.")
-    try:
-        o.reboot()
-    except Exception:
-        pass  # the connection is torn down by the reboot; that is the exception
-    time.sleep(2.0)
-    print("\nre-reading:\n")
-    o = _find(max(args.timeout, 20.0))
+    o = _save_and_reboot(o, args.timeout)
+    print("\nre-reading from the rebooted board:\n")
     ok = _report(o)
     print("applied and verified." if ok else "SOMETHING DID NOT STICK - see the 'differs' rows.")
     return 0 if ok else 1
@@ -304,14 +339,8 @@ def cmd_setup_motors(args) -> int:
                 continue
             setattr(obj, leaf, v)
         print(f"  axis{i}: written")
-    print("\nsaving and rebooting (a disconnect error here is normal)")
-    o.save_configuration()
-    try:
-        o.reboot()
-    except Exception:  # noqa: BLE001
-        pass
-    time.sleep(2.0)
-    o = _find(max(args.timeout, 20.0))
+    print()
+    o = _save_and_reboot(o, args.timeout)
     for i, ax in _axes(o, None):
         print(f"  axis{i}: pole_pairs {ax.motor.config.pole_pairs}, cpr {ax.encoder.config.cpr}, "
               f"mode {ax.encoder.config.mode}, vel_gain {ax.controller.config.vel_gain:.3f}")
@@ -387,11 +416,10 @@ def cmd_calibrate(args) -> int:
             ok_all = False
     if ok_all:
         print("\nsaving (pre_calibrated survives reboot; the robot can now enter closed loop)")
-        o.save_configuration()
-        try:
-            o.reboot()
-        except Exception:  # noqa: BLE001
-            pass
+        o = _save_and_reboot(o, args.timeout)
+        for i, ax in _axes(o, args.axis):
+            print(f"  axis{i}: motor pre_calibrated {ax.motor.config.pre_calibrated}, "
+                  f"encoder pre_calibrated {ax.encoder.config.pre_calibrated}")
         print("next:  ./config/odrive-check.sh --spin --axis 0   (then --axis 1)")
     return 0 if ok_all else 1
 
@@ -474,6 +502,9 @@ def main() -> int:
         if args.spin:
             return cmd_spin(args)
         return cmd_report(args)
+    except RuntimeError as e:
+        print(f"\nFAILED: {e}", file=sys.stderr)
+        return 1
     except TimeoutError:
         print("no ODrive found. Is the board powered (its USB only works with DC on the "
               "terminals), and is the udev rule installed? `lsusb | grep 1209`", file=sys.stderr)
