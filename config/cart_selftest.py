@@ -287,6 +287,12 @@ def test_base(robot: XLerobot, speed: float = 0.08, turn: float = 25.0) -> None:
         record(WARN, "base test skipped")
         return
 
+    odrive = robot.config.base == "odrive"
+    if odrive:
+        # Hall feedback on a hub motor is coarse at low speed (cpr 90: at
+        # 0.15 turns/s that is ~14 edges/s) and the wheel moves in small
+        # steps, so a slow test reads noise. ~0.4 turns/s is smooth.
+        speed, turn = 0.2, 45.0
     moves = [
         ("forward", {"x.vel": speed}, "x.vel", speed),
         ("backward", {"x.vel": -speed}, "x.vel", -speed),
@@ -294,23 +300,40 @@ def test_base(robot: XLerobot, speed: float = 0.08, turn: float = 25.0) -> None:
         ("turn right", {"theta.vel": -turn}, "theta.vel", -turn),
     ]
     for label, action, key, want in moves:
+        samples, wheels = [], []
         try:
-            for _ in range(12):           # ~1.2s of commands, it is a velocity
+            # 1.5 s of commands (it is a velocity); average the last 0.8 s,
+            # after the wheels have come up to speed. One instant of a
+            # velocity estimate says little.
+            for k in range(15):
                 robot.send_action(action)
                 time.sleep(0.1)
-            got = statistics.median(robot.get_observation()[key] for _ in range(5))
+                if k >= 7:
+                    samples.append(robot.get_observation()[key])
+                    if odrive:
+                        b = robot.base
+                        wheels.append((b.left.encoder.vel_estimate, b.right.encoder.vel_estimate))
+            got = statistics.mean(samples)
         finally:
             robot.stop_base()
-            time.sleep(0.5)
+            time.sleep(0.8)
 
+        spread = f"(range {min(samples):+.3f}..{max(samples):+.3f})"
         same_sign = math.copysign(1, got) == math.copysign(1, want)
         if abs(got) < abs(want) * 0.2:
-            record(FAIL, f"base {label}: no feedback", f"{key} read {got:.3f}, commanded {want:.3f}")
+            record(FAIL, f"base {label}: no feedback", f"{key} read {got:.3f}, commanded {want:.3f} {spread}")
         elif not same_sign:
             record(FAIL, f"base {label}: wrong direction",
-                   f"{key} read {got:.3f}, commanded {want:.3f} - a wheel is reversed")
+                   f"{key} read {got:.3f}, commanded {want:.3f} {spread} - a wheel is reversed")
+        elif not (0.7 <= got / want <= 1.3):
+            record(WARN, f"base {label}: off by {got / want:.2f}x",
+                   f"{key} {got:.3f} vs {want:.3f} commanded {spread}")
         else:
-            record(PASS, f"base {label}", f"{key} {got:.3f} vs {want:.3f} commanded")
+            record(PASS, f"base {label}", f"{key} {got:.3f} vs {want:.3f} commanded {spread}")
+        if wheels:
+            lt = statistics.mean(w[0] for w in wheels)
+            rt = statistics.mean(w[1] for w in wheels)
+            print(f"        raw wheel turns/s (before inversion): left {lt:+.3f}  right {rt:+.3f}")
 
     print("\n      Watch the wheels as well as the numbers. The body velocity is")
     print("      derived from all wheels together, so correct ones can mask one")
