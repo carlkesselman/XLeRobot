@@ -307,6 +307,10 @@ def cmd_halls(args) -> int:
         edges = abs(ax.encoder.shadow_count - start)
         pp = edges / 6.0
         print(f"\n  {edges} Hall edges in one turn -> {pp:.2f} pole pairs")
+        if edges == 0:
+            print(f"  axis{i} saw NO movement. Either the wheel you turned is not on this axis")
+            print(f"  (axis{i} should be the {side} wheel: M{i} phases AND M{i}_A/B/Z Halls), or")
+            print("  this wheel's Halls are not connected.")
         illegal = seen_states & {0, 7}
         if illegal:
             print(f"  ILLEGAL Hall state(s) {sorted(illegal)}: a Hall line is unconnected, has no")
@@ -323,7 +327,9 @@ def cmd_halls(args) -> int:
     pps = {i: round(v) for i, v in result.items()}
     if pps:
         print("pole pairs:", ", ".join(f"axis{i} {v}" for i, v in pps.items()))
-        if len(set(pps.values())) == 1 and all(abs(result[i] - pps[i]) < 0.25 for i in pps):
+        if any(v == 0 for v in pps.values()):
+            print("\nan axis counted nothing - fix that (see above) and repeat before --setup-motors")
+        elif len(set(pps.values())) == 1 and all(abs(result[i] - pps[i]) < 0.25 for i in pps):
             print(f"\nnext:  ./config/odrive-check.sh --setup-motors --pole-pairs {next(iter(pps.values()))}")
         else:
             print("\nthe two do not agree, or are not whole numbers - repeat, counting more carefully")
