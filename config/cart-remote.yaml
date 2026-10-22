@@ -47,8 +47,8 @@ robot:
   # dataset and on the operator's screen - are only as true as these two
   # numbers. wheel_radius is half the tyre's outside diameter under load;
   # wheelbase is centre-to-centre between the two tyres' contact patches.
-  wheel_radius: 0.0825      # 165 mm wheel
-  wheelbase: 0.25
+  wheel_radius: 0.0825      # 6.5 in (165.1 mm) hub wheel, vendor spec - confirmed 2026-10-21
+  wheelbase: 0.25          # PLACEHOLDER - measure tyre centre line to centre line
   # If forward drives the robot in a circle, one of these is wrong.
   invert_left_wheel: true
   invert_right_wheel: false
