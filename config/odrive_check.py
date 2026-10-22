@@ -408,6 +408,10 @@ def cmd_calibrate(args) -> int:
     if not (16.5 <= v <= 21.6):
         print(f"\nvbus {v:.1f} V is outside a 5S pack's 16.5-21 V. Refusing.", file=sys.stderr)
         return 1
+    if args.cal_max_voltage is not None and not (0 < args.cal_max_voltage <= min(8.0, 0.4 * v)):
+        print(f"--cal-max-voltage must be above 0 and at most {min(8.0, 0.4 * v):.1f} V here",
+              file=sys.stderr)
+        return 2
     if not _yes("\nOn the drill pack, both wheels clear of the ground?"):
         return 1
     motor_cal = _enum("AXIS_STATE_MOTOR_CALIBRATION", 4)
@@ -419,6 +423,10 @@ def cmd_calibrate(args) -> int:
         side = SIDE[i]
         print(f"\n--- axis{i} ({side}) ---")
         _clear(o)
+        if args.cal_max_voltage is not None:
+            # The test current stays the same; this only lets the board apply
+            # more voltage to reach it, i.e. accept a higher-resistance motor.
+            ax.motor.config.resistance_calib_max_voltage = args.cal_max_voltage
         # (label, state, optional). Hall polarity calibration exists in the
         # python package's enums but not in every 0.5.x firmware: 0.5.1
         # answers it with AXIS_ERROR_INVALID_STATE (seen 2026-10-19). Offset
@@ -445,8 +453,11 @@ def cmd_calibrate(args) -> int:
                 m = ax.motor.config
                 i_cal = getattr(m, "calibration_current", float("nan"))
                 v_max = getattr(m, "resistance_calib_max_voltage", float("nan"))
-                print(f"    measured phase resistance {m.phase_resistance * 1000:.0f} mOhm, "
-                      f"inductance {m.phase_inductance * 1e6:.0f} uH")
+                if errs["motor"] and m.phase_resistance == 0:
+                    print("    phase resistance not measured (the board keeps only a passing value)")
+                else:
+                    print(f"    measured phase resistance {m.phase_resistance * 1000:.0f} mOhm, "
+                          f"inductance {m.phase_inductance * 1e6:.0f} uH")
                 print(f"    (test current {i_cal:g} A, voltage allowed {v_max:g} V -> "
                       f"resistance must be under {1000 * v_max / i_cal:.0f} mOhm)")
                 if errs["motor"] & 0x1:
@@ -455,6 +466,9 @@ def cmd_calibrate(args) -> int:
                     print("    as enormous resistance - check all three screw terminals and any")
                     print("    extension joints on this wheel. A genuinely high-resistance motor")
                     print("    instead reads just over the limit (compare with the other wheel).")
+                    print("    To tell them apart: rerun this axis with --cal-max-voltage 6 (limit")
+                    print("    600 mOhm). Passes near the other wheel's value = just the motor;")
+                    print("    still fails = an open or loose phase.")
             if any(errs.values()):
                 ok = False
                 break
@@ -542,8 +556,11 @@ def main() -> int:
     g.add_argument("--setup-motors", action="store_true", help="write the hub-motor config, save, reboot")
     g.add_argument("--calibrate", action="store_true", help="motor + Hall calibration (drill pack, wheels up)")
     g.add_argument("--spin", action="store_true", help="closed-loop velocity test on one axis")
-    ap.add_argument("--axis", type=int, choices=(0, 1), default=None, help="0 = left, 1 = right; default both")
+    ap.add_argument("--axis", type=int, choices=(0, 1), default=None, help="0 = right wheel (M0), 1 = left wheel (M1); default both")
     ap.add_argument("--pole-pairs", type=int, default=None)
+    ap.add_argument("--cal-max-voltage", type=float, default=None,
+                    help="--calibrate: voltage the resistance test may use (default as configured, 4 V); "
+                         "raises the resistance limit, not the current")
     ap.add_argument("--kv", type=float, default=16.0, help="motor KV, rpm/V (hoverboard-class ~16)")
     ap.add_argument("--current-lim", type=float, default=15.0, help="motor current limit, A")
     ap.add_argument("--vel-limit", type=float, default=10.0, help="turns/s")
