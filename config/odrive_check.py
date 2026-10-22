@@ -27,6 +27,8 @@ on M0_A/B/Z and M1_A/B/Z with their 5V and GND):
     --push [--speed 0.2]          BOTH wheels forward ON THE FLOOR (m/s):
                                   which limit stops it at an obstacle -
                                   motor current, pack current, or gains
+    --spin/--push --vel-gain G    try a velocity gain for that run (RAM)
+    --save-gains --vel-gain G     keep it (integrator 5x G unless --int-gain)
 
 axis0 (M0) is the RIGHT wheel and axis1 (M1) the LEFT (odrive_base.py
 RIGHT_AXIS / LEFT_AXIS). With the battery terminals on the left edge, M0 is
@@ -504,6 +506,48 @@ def cmd_calibrate(args) -> int:
     return 0 if ok_all else 1
 
 
+def _gains(args):
+    """(vel_gain, vel_integrator_gain) from the command line, or None.
+    The integrator defaults to 5x vel_gain, the hoverboard guide's ratio."""
+    if args.vel_gain is None:
+        return None
+    return args.vel_gain, (args.int_gain if args.int_gain is not None else 5.0 * args.vel_gain)
+
+
+def _show_or_try_gains(o, args) -> None:
+    g = _gains(args)
+    for i, ax in ((0, o.axis0), (1, o.axis1)):
+        c = ax.controller.config
+        if g:
+            c.vel_gain, c.vel_integrator_gain = g
+        print(f"  axis{i} ({SIDE[i]}): vel_gain {c.vel_gain:.3f}, vel_integrator_gain "
+              f"{c.vel_integrator_gain:.3f}" + ("   (trying - RAM only)" if g else ""))
+    if g:
+        print("  These go away at the next reboot. Keep them with --save-gains.")
+
+
+def cmd_save_gains(args) -> int:
+    g = _gains(args)
+    if not g:
+        print("--save-gains needs --vel-gain [--int-gain]", file=sys.stderr)
+        return 2
+    o = _find(args.timeout)
+    idle = _enum("AXIS_STATE_IDLE", 1)
+    for i, ax in ((0, o.axis0), (1, o.axis1)):
+        ax.requested_state = idle
+        ax.controller.config.vel_gain, ax.controller.config.vel_integrator_gain = g
+    time.sleep(0.3)
+    o = _save_and_reboot(o, args.timeout)
+    ok = True
+    for i, ax in ((0, o.axis0), (1, o.axis1)):
+        c = ax.controller.config
+        good = abs(c.vel_gain - g[0]) < 1e-3 and abs(c.vel_integrator_gain - g[1]) < 1e-3
+        ok &= good
+        print(f"  axis{i} ({SIDE[i]}): vel_gain {c.vel_gain:.3f}, vel_integrator_gain "
+              f"{c.vel_integrator_gain:.3f}  {'saved' if good else 'NOT what was written'}")
+    return 0 if ok else 1
+
+
 def cmd_spin(args) -> int:
     if args.axis is None:
         print("--spin needs --axis 0 or 1", file=sys.stderr)
@@ -516,6 +560,7 @@ def cmd_spin(args) -> int:
     closed = _enum("AXIS_STATE_CLOSED_LOOP_CONTROL", 8)
     idle = _enum("AXIS_STATE_IDLE", 1)
     _clear(o)
+    _show_or_try_gains(o, args)
     ax.controller.config.control_mode = _enum("CONTROL_MODE_VELOCITY_CONTROL", 2)
     ax.controller.config.input_mode = _enum("INPUT_MODE_PASSTHROUGH", 1)
     ax.controller.input_vel = 0.0
@@ -585,6 +630,7 @@ def cmd_push(args) -> int:
     closed = _enum("AXIS_STATE_CLOSED_LOOP_CONTROL", 8)
     idle = _enum("AXIS_STATE_IDLE", 1)
     _clear(o)
+    _show_or_try_gains(o, args)
     axes = [(0, o.axis0), (1, o.axis1)]
     for i, ax in axes:
         ax.controller.config.control_mode = _enum("CONTROL_MODE_VELOCITY_CONTROL", 2)
@@ -657,7 +703,9 @@ def cmd_push(args) -> int:
         print("Motor current reached its limit: more push needs a higher current_lim.")
     else:
         print("Neither current limit was reached: the speed controller never asked for")
-        print("more torque. That is the gains (vel_gain / vel_integrator_gain).")
+        print("more torque. That is the gains. Try a higher one for this run only:")
+        print("  ./config/odrive-check.sh --push --vel-gain 2   (then --spin on blocks: no buzz)")
+        print("and keep it with --save-gains --vel-gain N.")
     return 0
 
 
@@ -671,10 +719,16 @@ def main() -> int:
     g.add_argument("--setup-motors", action="store_true", help="write the hub-motor config, save, reboot")
     g.add_argument("--calibrate", action="store_true", help="motor + Hall calibration (drill pack, wheels up)")
     g.add_argument("--spin", action="store_true", help="closed-loop velocity test on one axis")
+    g.add_argument("--save-gains", action="store_true",
+                   help="write --vel-gain [--int-gain] to both axes, save, reboot, verify")
     g.add_argument("--push", action="store_true",
                    help="both wheels forward ON THE FLOOR, logging current limits (--speed in m/s)")
     ap.add_argument("--axis", type=int, choices=(0, 1), default=None, help="0 = right wheel (M0), 1 = left wheel (M1); default both")
     ap.add_argument("--pole-pairs", type=int, default=None)
+    ap.add_argument("--vel-gain", type=float, default=None,
+                    help="--spin/--push: try this vel_gain (RAM only); --save-gains: keep it")
+    ap.add_argument("--int-gain", type=float, default=None,
+                    help="vel_integrator_gain to go with it (default 5x --vel-gain)")
     ap.add_argument("--cal-max-voltage", type=float, default=None,
                     help="--calibrate: voltage the resistance test may use (default as configured: 6 V from --setup-motors); "
                          "raises the resistance limit, not the current")
@@ -698,6 +752,8 @@ def main() -> int:
             return cmd_calibrate(args)
         if args.spin:
             return cmd_spin(args)
+        if args.save_gains:
+            return cmd_save_gains(args)
         if args.push:
             if args.speed == 0.5:
                 args.speed = 0.2      # m/s here, not turns/s
