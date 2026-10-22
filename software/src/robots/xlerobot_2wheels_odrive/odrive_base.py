@@ -49,6 +49,7 @@ class ODriveBase:
         invert_left: bool = True,
         invert_right: bool = False,
         max_linear_mps: float = 1.0,
+        max_accel_mps2: float = 1.0,
         connect_timeout_s: int = 30,
         serial_number: str | None = None,
     ):
@@ -64,6 +65,13 @@ class ODriveBase:
                 because it depends on how the phases and Halls were wired.
                 Settle it with `odrive-check.sh --spin`.
             max_linear_mps: per-wheel clamp, a safety limit on a runaway command.
+            max_accel_mps2: per-wheel acceleration limit, applied on the board
+                (INPUT_MODE_VEL_RAMP). Teleop sends a new velocity every tick;
+                passed straight through, each step is a torque spike, which at
+                the high gains a carpet edge needs makes the cart jerk. The
+                ramp smooths the command without softening the controller's
+                response to a load. It applies to stops too: from 0.5 m/s at
+                1.0 m/s^2 the wheels take 0.5 s and ~12 cm. 0 = passthrough.
             serial_number: pick a specific board when more than one is attached.
         """
         self.wheel_radius = wheel_radius
@@ -71,6 +79,7 @@ class ODriveBase:
         self.invert_left = invert_left
         self.invert_right = invert_right
         self.max_linear_mps = max_linear_mps
+        self.max_accel_mps2 = max_accel_mps2
         self.connect_timeout_s = connect_timeout_s
         self.serial_number = serial_number
 
@@ -101,6 +110,10 @@ class ODriveBase:
                 CONTROL_MODE_VELOCITY_CONTROL,
                 INPUT_MODE_PASSTHROUGH,
             )
+            try:
+                from odrive.enums import INPUT_MODE_VEL_RAMP
+            except ImportError:  # same value on every 0.5.x
+                INPUT_MODE_VEL_RAMP = 2
         except ImportError as e:
             raise ImportError(
                 "The odrive package is required for xlerobot_2wheels_odrive. "
@@ -129,7 +142,11 @@ class ODriveBase:
 
         for axis in (self.left, self.right):
             axis.controller.config.control_mode = CONTROL_MODE_VELOCITY_CONTROL
-            axis.controller.config.input_mode = INPUT_MODE_PASSTHROUGH
+            if self.max_accel_mps2 > 0:
+                axis.controller.config.vel_ramp_rate = self.max_accel_mps2 / self.wheel_circumference
+                axis.controller.config.input_mode = INPUT_MODE_VEL_RAMP
+            else:
+                axis.controller.config.input_mode = INPUT_MODE_PASSTHROUGH
             # The robot's own control loop is the watchdog; ODrive's would trip
             # on any pause in the lerobot loop.
             axis.config.enable_watchdog = False

@@ -54,6 +54,7 @@ robot:
   invert_right_wheel: false
   # Per-wheel clamp, m/s. Keep it low until the directions are proven.
   max_linear_mps: 0.5
+  max_accel_mps2: 1.0       # ODrive velocity ramp: smooth teleop at vel_gain 8. 0 = off
 
   disable_torque_on_disconnect: true
 

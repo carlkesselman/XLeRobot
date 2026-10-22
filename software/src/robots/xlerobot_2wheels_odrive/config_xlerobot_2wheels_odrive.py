@@ -87,6 +87,10 @@ class XLerobot2WheelsODriveConfig(XLerobotConfig):
 
     # Per-wheel clamp, m/s. A safety limit against a runaway command.
     max_linear_mps: float = 1.0
+    # Per-wheel acceleration limit, m/s^2, ramped on the ODrive. Smooths
+    # teleop's tick-to-tick velocity steps at high gains; also lengthens
+    # stops (0.5 s from 0.5 m/s at 1.0). 0 = no ramp.
+    max_accel_mps2: float = 1.0
 
     odrive_connect_timeout_s: int = 30
     # Set when more than one ODrive is attached; None takes the first found.
