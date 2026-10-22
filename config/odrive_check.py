@@ -24,6 +24,9 @@ on M0_A/B/Z and M1_A/B/Z with their 5V and GND):
                                   so the robot can enter closed loop at boot.
     --spin --axis N [--speed 0.5] closed-loop velocity for a few seconds:
                                   commanded vs measured, direction, current
+    --push [--speed 0.2]          BOTH wheels forward ON THE FLOOR (m/s):
+                                  which limit stops it at an obstacle -
+                                  motor current, pack current, or gains
 
 axis0 (M0) is the RIGHT wheel and axis1 (M1) the LEFT (odrive_base.py
 RIGHT_AXIS / LEFT_AXIS). With the battery terminals on the left edge, M0 is
@@ -546,6 +549,118 @@ def cmd_spin(args) -> int:
     return 0 if good else 1
 
 
+def _robot_block() -> dict:
+    """The robot: block of cart-remote.yaml (wheel geometry, invert flags)."""
+    from pathlib import Path
+    import yaml
+    path = Path(__file__).resolve().parent / "cart-remote.yaml"
+    try:
+        return (yaml.safe_load(path.read_text()) or {}).get("robot", {}) or {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def cmd_push(args) -> int:
+    """Both wheels forward ON THE FLOOR, logging what limits the push.
+
+    For "it cannot get over the carpet": put the cart against the edge and
+    run this. Every 0.2 s it prints each wheel's speed and motor current, the
+    current drawn from the pack, and the controller's integrator - which is
+    the part of the torque that builds up while a wheel is held back. The
+    summary says which limit was hit: the motor current limit, the pack
+    current limit (a FAULT on 0.5.1, not a ceiling), or neither (the speed
+    controller never asked for enough torque - gains).
+    """
+    rb = _robot_block()
+    radius = float(rb.get("wheel_radius", 0.0825))
+    inv = {1: bool(rb.get("invert_left_wheel", True)), 0: bool(rb.get("invert_right_wheel", False))}
+    circ = 2 * 3.141592653589793 * radius
+    tps = args.speed / circ
+    o = _find(args.timeout)
+    print(f"Both wheels forward at {args.speed:g} m/s ({tps:.2f} turns/s) for {args.seconds:g} s,")
+    print(f"wheel radius {radius} m, left inverted {inv[1]}, right inverted {inv[0]} (cart-remote.yaml).")
+    print("ON THE FLOOR, pointing at the obstacle, with room to stop. Ctrl-C stops it.")
+    if not _yes("Clear ahead?"):
+        return 1
+    closed = _enum("AXIS_STATE_CLOSED_LOOP_CONTROL", 8)
+    idle = _enum("AXIS_STATE_IDLE", 1)
+    _clear(o)
+    axes = [(0, o.axis0), (1, o.axis1)]
+    for i, ax in axes:
+        ax.controller.config.control_mode = _enum("CONTROL_MODE_VELOCITY_CONTROL", 2)
+        ax.controller.config.input_mode = _enum("INPUT_MODE_PASSTHROUGH", 1)
+        ax.controller.input_vel = 0.0
+        ax.requested_state = closed
+    time.sleep(0.5)
+    for i, ax in axes:
+        if ax.current_state != closed:
+            print(f"axis{i} did not enter closed loop: {_fmt_errors(_axis_errors(ax))}")
+            for _, a in axes:
+                a.requested_state = idle
+            return 1
+    ilim = {i: getattr(ax.motor.config, "current_lim", float("nan")) for i, ax in axes}
+    blim = getattr(o.config, "dc_max_positive_current", float("nan"))
+    sign = {i: (-1.0 if inv[i] else 1.0) for i, _ in axes}
+
+    def iq(ax):
+        return abs(getattr(ax.motor.current_control, "Iq_measured", 0.0))
+
+    def integ(ax):
+        return getattr(ax.controller, "vel_integrator_torque", float("nan"))
+
+    print(f"\nlimits: motor current {ilim[0]:g} / {ilim[1]:g} A, pack current {blim:g} A")
+    print(f"\n{'t s':>5} {'R t/s':>7} {'L t/s':>7} {'R A':>6} {'L A':>6} {'bus A':>6} "
+          f"{'vbus':>5} {'R int':>6} {'L int':>6}")
+    peak = {"iq": {0: 0.0, 1: 0.0}, "ibus": 0.0, "vmin": 99.0}
+    faults = {}
+    t0 = time.time(); last = -1.0
+    try:
+        for i, ax in axes:
+            ax.controller.input_vel = sign[i] * tps
+        while time.time() - t0 < args.seconds:
+            t = time.time() - t0
+            ibus = getattr(o, "ibus", float("nan"))
+            vb = o.vbus_voltage
+            peak["ibus"] = max(peak["ibus"], ibus)
+            peak["vmin"] = min(peak["vmin"], vb)
+            for i, ax in axes:
+                peak["iq"][i] = max(peak["iq"][i], iq(ax))
+                if ax.error and i not in faults:
+                    faults[i] = (t, _fmt_errors(_axis_errors(ax)))
+            if t - last >= 0.2:
+                last = t
+                r, l = o.axis0, o.axis1
+                print(f"{t:5.1f} {sign[0] * r.encoder.vel_estimate:+7.2f} {sign[1] * l.encoder.vel_estimate:+7.2f} "
+                      f"{iq(r):6.1f} {iq(l):6.1f} {ibus:6.1f} {vb:5.1f} {integ(r):+6.2f} {integ(l):+6.2f}")
+            if faults:
+                break
+            time.sleep(0.02)
+    except KeyboardInterrupt:
+        print("\nstopped")
+    finally:
+        for _, ax in axes:
+            ax.controller.input_vel = 0.0
+        time.sleep(0.5)
+        for _, ax in axes:
+            ax.requested_state = idle
+
+    print(f"\npeak motor current: right {peak['iq'][0]:.1f} A, left {peak['iq'][1]:.1f} A "
+          f"(limit {ilim[0]:g} A)")
+    print(f"peak pack current : {peak['ibus']:.1f} A (limit {blim:g} A), vbus min {peak['vmin']:.1f} V")
+    for i, (t, e) in faults.items():
+        print(f"FAULT axis{i} ({SIDE[i]}) at {t:.1f} s: {e}")
+    print()
+    if faults:
+        print("A fault stopped it. DC_BUS_OVER_CURRENT = the pack-current limit tripped (0.5.1")
+        print("faults rather than limiting); DC_BUS_UNDER_VOLTAGE = the pack sagged.")
+    elif max(peak["iq"].values()) >= 0.9 * min(ilim.values()):
+        print("Motor current reached its limit: more push needs a higher current_lim.")
+    else:
+        print("Neither current limit was reached: the speed controller never asked for")
+        print("more torque. That is the gains (vel_gain / vel_integrator_gain).")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -556,6 +671,8 @@ def main() -> int:
     g.add_argument("--setup-motors", action="store_true", help="write the hub-motor config, save, reboot")
     g.add_argument("--calibrate", action="store_true", help="motor + Hall calibration (drill pack, wheels up)")
     g.add_argument("--spin", action="store_true", help="closed-loop velocity test on one axis")
+    g.add_argument("--push", action="store_true",
+                   help="both wheels forward ON THE FLOOR, logging current limits (--speed in m/s)")
     ap.add_argument("--axis", type=int, choices=(0, 1), default=None, help="0 = right wheel (M0), 1 = left wheel (M1); default both")
     ap.add_argument("--pole-pairs", type=int, default=None)
     ap.add_argument("--cal-max-voltage", type=float, default=None,
@@ -564,7 +681,7 @@ def main() -> int:
     ap.add_argument("--kv", type=float, default=16.0, help="motor KV, rpm/V (hoverboard-class ~16)")
     ap.add_argument("--current-lim", type=float, default=15.0, help="motor current limit, A")
     ap.add_argument("--vel-limit", type=float, default=10.0, help="turns/s")
-    ap.add_argument("--speed", type=float, default=0.5, help="--spin, turns/s")
+    ap.add_argument("--speed", type=float, default=0.5, help="--spin: turns/s (0.5). --push: m/s (default 0.2)")
     ap.add_argument("--seconds", type=float, default=3.0, help="--spin duration")
     ap.add_argument("--timeout", type=float, default=10.0, help="seconds to wait for the board")
     args = ap.parse_args()
@@ -581,6 +698,10 @@ def main() -> int:
             return cmd_calibrate(args)
         if args.spin:
             return cmd_spin(args)
+        if args.push:
+            if args.speed == 0.5:
+                args.speed = 0.2      # m/s here, not turns/s
+            return cmd_push(args)
         return cmd_report(args)
     except RuntimeError as e:
         print(f"\nFAILED: {e}", file=sys.stderr)
