@@ -346,7 +346,7 @@ def cmd_setup_motors(args) -> int:
     kt = 8.27 / kv
     cfg = {
         "motor.config.pole_pairs": pp,
-        "motor.config.resistance_calib_max_voltage": 4.0,
+        "motor.config.resistance_calib_max_voltage": 6.0,   # 4 (hoverboard guide) rejects the left wheel at 412 mOhm
         "motor.config.requested_current_range": 25.0,
         "motor.config.current_control_bandwidth": 100.0,
         "motor.config.torque_constant": kt,
@@ -559,7 +559,7 @@ def main() -> int:
     ap.add_argument("--axis", type=int, choices=(0, 1), default=None, help="0 = right wheel (M0), 1 = left wheel (M1); default both")
     ap.add_argument("--pole-pairs", type=int, default=None)
     ap.add_argument("--cal-max-voltage", type=float, default=None,
-                    help="--calibrate: voltage the resistance test may use (default as configured, 4 V); "
+                    help="--calibrate: voltage the resistance test may use (default as configured: 6 V from --setup-motors); "
                          "raises the resistance limit, not the current")
     ap.add_argument("--kv", type=float, default=16.0, help="motor KV, rpm/V (hoverboard-class ~16)")
     ap.add_argument("--current-lim", type=float, default=15.0, help="motor current limit, A")
