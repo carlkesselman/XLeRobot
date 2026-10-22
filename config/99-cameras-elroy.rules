@@ -31,18 +31,20 @@
 # really did take with a plain trigger, something else was going on - but
 # check the action before blaming the match next time.
 #
-# MEASURED 2026-10-09 on elroy, with both cameras on the external hub:
+# MEASURED 2026-10-22 on elroy (re-measured after the base wiring moved
+# the hub; was 2.3.3 / 2.3.4 on 2026-10-09), both cameras on the external hub,
+# left identified by unplugging it:
 #
 #   platform-3610000.usb   the Tegra xHCI controller (stable across boots)
-#   usb-0:2.3.3            root port 2 -> internal hub port 3 -> hub port 3
-#   usb-0:2.3.4            root port 2 -> internal hub port 3 -> hub port 4
+#   usb-0:2.1.3            root port 2 -> internal hub port 1 -> hub port 3   LEFT
+#   usb-0:2.1.1            root port 2 -> internal hub port 1 -> hub port 1   RIGHT
 #
 # These encode YOUR HUB'S PORTS. Move a camera to a different hub port, or
 # the hub to a different Type-A port, and the path changes and the rule
 # silently stops matching. Check `ls -l /dev/cam_*` after any replug.
 
-SUBSYSTEM=="video4linux", ENV{ID_PATH}=="platform-3610000.usb-usb-0:2.3.3:1.0", ENV{ID_V4L_CAPABILITIES}=="*:capture:*", GROUP="video", MODE="0660", SYMLINK+="cam_left"
-SUBSYSTEM=="video4linux", ENV{ID_PATH}=="platform-3610000.usb-usb-0:2.3.4:1.0", ENV{ID_V4L_CAPABILITIES}=="*:capture:*", GROUP="video", MODE="0660", SYMLINK+="cam_right"
+SUBSYSTEM=="video4linux", ENV{ID_PATH}=="platform-3610000.usb-usb-0:2.1.3:1.0", ENV{ID_V4L_CAPABILITIES}=="*:capture:*", GROUP="video", MODE="0660", SYMLINK+="cam_left"
+SUBSYSTEM=="video4linux", ENV{ID_PATH}=="platform-3610000.usb-usb-0:2.1.1:1.0", ENV{ID_V4L_CAPABILITIES}=="*:capture:*", GROUP="video", MODE="0660", SYMLINK+="cam_right"
 
 # The head RealSense needs no rule here: it is addressed by serial number
 # (836112060112), not a device path, so it can move ports freely. It may

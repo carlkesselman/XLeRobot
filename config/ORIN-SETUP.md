@@ -184,13 +184,17 @@ move to the Pi:
 The configs use `/dev/cam_left` and `/dev/cam_right`, so the physical port
 lives in one udev rule instead of three config files.
 
-**Measured on elroy, 2026-10-09** — both wrist cameras on the external hub:
+**Measured on elroy, 2026-10-22** — both wrist cameras on the external hub
+(re-measured after the base wiring; on 2026-10-09 they were `2.3.3` / `2.3.4`
+and the RealSense `1.1`):
 
 | | ID_PATH | node |
 |---|---|---|
-| left wrist | `platform-3610000.usb-usb-0:2.3.3:1.0` | video6 |
-| right wrist | `platform-3610000.usb-usb-0:2.3.4:1.0` | video8 |
-| head RealSense | `platform-3610000.usb-usb-0:1.1:1.0` and `:1.3` | video0–5 |
+| left wrist | `platform-3610000.usb-usb-0:2.1.3:1.0` | video2 |
+| right wrist | `platform-3610000.usb-usb-0:2.1.1:1.0` | video0 |
+| head RealSense | `platform-3610000.usb-usb-0:1.3:1.0` and `:1.3` | video4–9 |
+
+Node numbers follow plug-in order and are not stable; the `cam_*` names are.
 
 `config/99-cameras-elroy.rules` has those baked in:
 
@@ -201,7 +205,8 @@ sudo udevadm trigger --action=add --subsystem-match=video4linux
 ls -l /dev/cam_*
 ```
 
-You should see `cam_left -> video6` and `cam_right -> video8`.
+You should see `cam_left` and `cam_right` pointing at the capture node of each
+(today `video2` and `video0`; the numbers can change between boots).
 
 **`--action=add` is load-bearing.** Plain `udevadm trigger` fires *change*
 events, and these rules do not take effect on a change: you reload, you
