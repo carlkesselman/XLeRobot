@@ -680,6 +680,7 @@ def cmd_push(args) -> int:
     print(f"\n{'t s':>5} {'R t/s':>7} {'L t/s':>7} {'R A':>6} {'L A':>6} {'bus A':>6} "
           f"{'vbus':>5} {'R int':>6} {'L int':>6}")
     peak = {"iq": {0: 0.0, 1: 0.0}, "ibus": 0.0, "vmin": 99.0}
+    trace = {0: [], 1: []}          # (t, forward turns/s, |Iq|) every sample
     faults = {}
     t0 = time.time(); last = -1.0
     try:
@@ -693,6 +694,7 @@ def cmd_push(args) -> int:
             peak["vmin"] = min(peak["vmin"], vb)
             for i, ax in axes:
                 peak["iq"][i] = max(peak["iq"][i], iq(ax))
+                trace[i].append((t, sign[i] * ax.encoder.vel_estimate, iq(ax)))
                 if ax.error and i not in faults:
                     faults[i] = (t, _fmt_errors(_axis_errors(ax)))
             if t - last >= 0.2:
@@ -717,6 +719,19 @@ def cmd_push(args) -> int:
     print(f"peak pack current : {peak['ibus']:.1f} A (limit {blim:g} A), vbus min {peak['vmin']:.1f} V")
     for i, (t, e) in faults.items():
         print(f"FAULT axis{i} ({SIDE[i]}) at {t:.1f} s: {e}")
+    # Smoothness over the second half, for comparing gains on an open floor.
+    # Only meaningful if nothing stopped the cart in that half.
+    print(f"\nsecond half, for comparing settings on an OPEN floor (commanded {tps:.2f} turns/s):")
+    for i in (0, 1):
+        half = [x for x in trace[i] if x[0] >= args.seconds / 2]
+        if len(half) < 5:
+            continue
+        v = [x[1] for x in half]; a = [x[2] for x in half]
+        m = sum(v) / len(v)
+        sd = (sum((x - m) ** 2 for x in v) / len(v)) ** 0.5
+        print(f"  {SIDE[i]:<5} speed {m:+.2f} turns/s, ripple {sd:.3f} ({100 * sd / max(abs(tps), 1e-6):.0f}% of command), "
+              f"current mean {sum(a) / len(a):.1f} A, peak {max(a):.1f} A")
+    print("  lower ripple = smoother; compare runs at the same --speed")
     print()
     if faults:
         print("A fault stopped it. DC_BUS_OVER_CURRENT = the pack-current limit tripped (0.5.1")
