@@ -526,35 +526,44 @@ def _gains(args):
 
 def _show_or_try_gains(o, args) -> None:
     g = _gains(args)
+    bw = args.enc_bw
     for i, ax in ((0, o.axis0), (1, o.axis1)):
         c = ax.controller.config
         if g:
             c.vel_gain, c.vel_integrator_gain = g
+        if bw is not None:
+            ax.encoder.config.bandwidth = bw
         print(f"  axis{i} ({SIDE[i]}): vel_gain {c.vel_gain:.3f}, vel_integrator_gain "
-              f"{c.vel_integrator_gain:.3f}" + ("   (trying - RAM only)" if g else ""))
-    if g:
+              f"{c.vel_integrator_gain:.3f}, encoder bandwidth {ax.encoder.config.bandwidth:g}"
+              + ("   (trying - RAM only)" if (g or bw is not None) else ""))
+    if g or bw is not None:
         print("  These go away at the next reboot. Keep them with --save-gains.")
 
 
 def cmd_save_gains(args) -> int:
     g = _gains(args)
     if not g:
-        print("--save-gains needs --vel-gain [--int-gain]", file=sys.stderr)
+        print("--save-gains needs --vel-gain [--int-gain] [--enc-bw]", file=sys.stderr)
         return 2
     o = _find(args.timeout)
     idle = _enum("AXIS_STATE_IDLE", 1)
     for i, ax in ((0, o.axis0), (1, o.axis1)):
         ax.requested_state = idle
         ax.controller.config.vel_gain, ax.controller.config.vel_integrator_gain = g
+        if args.enc_bw is not None:
+            ax.encoder.config.bandwidth = args.enc_bw
     time.sleep(0.3)
     o = _save_and_reboot(o, args.timeout)
     ok = True
     for i, ax in ((0, o.axis0), (1, o.axis1)):
         c = ax.controller.config
         good = abs(c.vel_gain - g[0]) < 1e-3 and abs(c.vel_integrator_gain - g[1]) < 1e-3
+        if args.enc_bw is not None:
+            good &= abs(ax.encoder.config.bandwidth - args.enc_bw) < 1e-3
         ok &= good
         print(f"  axis{i} ({SIDE[i]}): vel_gain {c.vel_gain:.3f}, vel_integrator_gain "
-              f"{c.vel_integrator_gain:.3f}  {'saved' if good else 'NOT what was written'}")
+              f"{c.vel_integrator_gain:.3f}, encoder bandwidth {ax.encoder.config.bandwidth:g}"
+              f"  {'saved' if good else 'NOT what was written'}")
     return 0 if ok else 1
 
 
@@ -595,8 +604,11 @@ def cmd_spin(args) -> int:
         ax.requested_state = idle
     steady = vels[len(vels) // 2:] or vels
     mean = sum(steady) / len(steady)
+    steady_a = amps[len(amps) // 2:] or amps
     print(f"commanded {args.speed:+.2f} turns/s, measured {mean:+.2f} turns/s "
           f"(steady half), current up to {max(amps):.1f} A, errors {_fmt_errors(_axis_errors(ax))}")
+    print(f"steady-state current: mean {sum(steady_a) / len(steady_a):.1f} A, peak {max(steady_a):.1f} A "
+          "- on blocks this should be a few amps; much more is the controller chattering")
     print("Note which way the wheel turned relative to 'forward' for the cart - that")
     print("sets invert_left_wheel / invert_right_wheel in cart-remote.yaml.")
     good = abs(mean - args.speed) < 0.25 * abs(args.speed) and not any(_axis_errors(ax).values())
@@ -737,6 +749,8 @@ def main() -> int:
     ap.add_argument("--pole-pairs", type=int, default=None)
     ap.add_argument("--vel-gain", type=float, default=None,
                     help="--spin/--push: try this vel_gain (RAM only); --save-gains: keep it")
+    ap.add_argument("--enc-bw", type=float, default=None,
+                    help="encoder bandwidth, rad/s (100 now): lower = smoother Hall speed estimate, more lag")
     ap.add_argument("--int-gain", type=float, default=None,
                     help="vel_integrator_gain to go with it (default 5x --vel-gain)")
     ap.add_argument("--cal-max-voltage", type=float, default=None,
