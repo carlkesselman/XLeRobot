@@ -70,7 +70,7 @@ drop them.
 ```
 rosie   rerun --port 9876                        # viewer, first
 rosie   ./config/operator-leader-host.sh         # leaders + gamepad
-elroy   ./config/cart-teleop.sh --watch          # drive, record nothing
+elroy   ./config/cart-teleop.sh                  # drive, record nothing (video if the viewer is up)
 elroy   ./config/cart-record.sh --watch me/ds "task"
 ```
 

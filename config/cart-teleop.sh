@@ -2,9 +2,11 @@
 # Run ON THE CART (elroy, the Orin). Drives the robot from the leaders at
 # the operator station, recording nothing.
 #
-#   ./config/cart-teleop.sh                 the full robot, headless
-#   ./config/cart-teleop.sh --watch         + video to a rerun viewer
-#   ./config/cart-teleop.sh --watch=web     + video as Foxglove, any browser
+#   ./config/cart-teleop.sh                 the full robot, video to the Mac's
+#                                           rerun viewer IF it is running
+#   ./config/cart-teleop.sh --no-watch      no video
+#   ./config/cart-teleop.sh --watch         video, and warn if no viewer answers
+#   ./config/cart-teleop.sh --watch=web     video as Foxglove, any browser
 #   BASE=none ./config/cart-teleop.sh       arms and head only (no wheels)
 #   BASE=omniwheels ...                     the three servo wheels on bus 2
 #   BASE=odrive ...                         the two brushless wheels (default)
@@ -34,11 +36,9 @@ if ! ping -c1 -W2 "$OPERATOR" >/dev/null 2>&1; then
   echo "warning: $OPERATOR does not answer ping - is operator-leader-host.sh running?" >&2
 fi
 
-# `|| :` is load-bearing. parse_watch_all returns 1 when there is no
-# --watch flag, and under `set -e` a bare non-zero statement exits the
-# script - silently, right after printing the header, which looks
-# exactly like a program that started and stopped.
-parse_watch_all "$@" || :
+# Video is on by default here, but only if the viewer answers: rerun
+# pointed at nothing back-pressures into the control loop. See _video.sh.
+watch_by_default "$@"
 set -- "${REMAINING[@]+"${REMAINING[@]}"}"
 echo
 

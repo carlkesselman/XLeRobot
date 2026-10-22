@@ -114,8 +114,9 @@ the cart's link stalls, the base zeroes and you lose the take. `Ctrl-B` then
 
 ```bash
 cd ~/GitHub/XLeRobot
-./config/cart-teleop.sh            # drive, record nothing
-./config/cart-teleop.sh --watch    # + video to the Mac
+./config/cart-teleop.sh            # drive, record nothing; video to the Mac if viewer.sh is running
+./config/cart-teleop.sh --watch    # video, warn if the viewer is not up
+./config/cart-teleop.sh --no-watch # no video
 ```
 
 Press ENTER at the calibration prompt to restore from file.

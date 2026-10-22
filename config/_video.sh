@@ -81,17 +81,45 @@ DISPLAY_ARGS=()
 
 # Scans ALL arguments and removes the one it consumes, so --watch can sit
 # anywhere. Sets DISPLAY_ARGS and rewrites the caller's positional
-# parameters via REMAINING.
+# parameters via REMAINING. --no-watch is consumed too and sets NO_WATCH=1.
+NO_WATCH=""
 parse_watch_all() {
   REMAINING=()
   local a found=1
   for a in "$@"; do
     case "$a" in
       --watch|--watch=web|--watch=local) parse_watch "$a" && found=0 ;;
+      --no-watch) NO_WATCH=1 ;;
       *) REMAINING+=("$a") ;;
     esac
   done
   return $found
+}
+
+# Is a rerun viewer listening at WATCH_HOST:WATCH_PORT? Bash's /dev/tcp, so
+# it needs no nc. Two seconds, then no.
+viewer_up() {
+  timeout 2 bash -c "exec 3<>/dev/tcp/$WATCH_HOST/$WATCH_PORT" 2>/dev/null
+}
+
+# For scripts where video is ON BY DEFAULT (cart-teleop.sh): an explicit
+# --watch* or --no-watch wins; otherwise send to the viewer if one answers,
+# and run without video if not - never point rerun at nothing, which
+# back-pressures into the control loop.
+watch_by_default() {
+  if parse_watch_all "$@"; then
+    return 0
+  fi
+  if [[ -n "$NO_WATCH" ]]; then
+    echo "video   : off (--no-watch)"
+  elif viewer_up; then
+    parse_watch --watch
+  else
+    echo "video   : OFF - no viewer answering at $WATCH_HOST:$WATCH_PORT."
+    echo "          Start ./config/viewer.sh on the Mac and restart this to get video;"
+    echo "          --no-watch silences this. (Running without it costs nothing.)"
+  fi
+  return 0
 }
 
 parse_watch() {
