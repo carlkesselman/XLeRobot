@@ -48,6 +48,10 @@ import time
 # axis -> wheel. Must match RIGHT_AXIS / LEFT_AXIS in odrive_base.py.
 SIDE = {0: "RIGHT", 1: "LEFT"}
 
+# Velocity gain the cart runs on (saved with --save-gains 2026-10-22); the
+# integrator is 5x. --setup-motors writes these, so a re-setup keeps them.
+TUNED_VEL_GAIN = 8.0
+
 TARGET = {
     "brake_resistance": 2.0,                 # the fitted 2 ohm / 50 W
     "dc_max_positive_current": 10.0,         # XH-M609 relay rating at 16-21 V
@@ -362,8 +366,14 @@ def cmd_setup_motors(args) -> int:
         "encoder.config.bandwidth": 100.0,
         "controller.config.control_mode": _enum("CONTROL_MODE_VELOCITY_CONTROL", 2),
         "controller.config.pos_gain": 1.0,
-        "controller.config.vel_gain": 0.02 * kt * cpr,
-        "controller.config.vel_integrator_gain": 0.1 * kt * cpr,
+        # Tuned on the cart 2026-10-22, not the hoverboard guide's formula
+        # (0.02 / 0.1 * kt * cpr = 0.93 / 4.65 here): at those the cart
+        # stalled at a carpet edge with the motors at 9.4 of 15 A. --vel-gain
+        # overrides; the integrator stays at 5x.
+        "controller.config.vel_gain": args.vel_gain if args.vel_gain is not None else TUNED_VEL_GAIN,
+        "controller.config.vel_integrator_gain": (args.int_gain if args.int_gain is not None else
+                                                  5.0 * (args.vel_gain if args.vel_gain is not None
+                                                         else TUNED_VEL_GAIN)),
         "controller.config.vel_limit": args.vel_limit,
     }
     print(f"pole pairs {pp}, KV {kv:g} -> torque constant {kt:.3f} Nm/A, Hall cpr {cpr}\n")
