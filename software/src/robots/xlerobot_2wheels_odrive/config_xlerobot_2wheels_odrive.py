@@ -91,6 +91,12 @@ class XLerobot2WheelsODriveConfig(XLerobotConfig):
     # teleop's tick-to-tick velocity steps at high gains; also lengthens
     # stops (0.5 s from 0.5 m/s at 1.0). 0 = no ramp.
     max_accel_mps2: float = 1.0
+    # Feed-forward torque per wheel (ODrive Nm), measured by
+    # config/base_characterize.py: rolling friction, and inertia in Nm per
+    # turn/s^2. Either > 0 moves the ramp from the board into odrive_base
+    # (see there). 0 / 0 = feedback only, as before.
+    friction_ff_nm: float = 0.0
+    inertia_ff: float = 0.0
 
     odrive_connect_timeout_s: int = 30
     # Set when more than one ODrive is attached; None takes the first found.

@@ -52,6 +52,8 @@ class ODriveBase:
         invert_right: bool = False,
         max_linear_mps: float = 1.0,
         max_accel_mps2: float = 1.0,
+        friction_ff_nm: float = 0.0,
+        inertia_ff: float = 0.0,
         connect_timeout_s: int = 30,
         serial_number: str | None = None,
     ):
@@ -74,6 +76,16 @@ class ODriveBase:
                 ramp smooths the command without softening the controller's
                 response to a load. It applies to stops too: from 0.5 m/s at
                 1.0 m/s^2 the wheels take 0.5 s and ~12 cm. 0 = passthrough.
+            friction_ff_nm / inertia_ff: feed-forward torque, per wheel, from
+                config/base_characterize.py. Hall feedback is too coarse at
+                low speed (one count per 5.8 mm of travel) for the velocity
+                loop to supply the torque a slow cart needs without lurching;
+                feed-forward supplies the predictable part - rolling friction
+                (Nm, Coulomb) and inertia x commanded acceleration (Nm per
+                turn/s^2) - and leaves the loop only the error. Either one > 0
+                switches the ramp from the board to this class (the board's
+                VEL_RAMP overwrites input_torque), PASSTHROUGH with
+                input_vel + input_torque each tick. Both 0 = as before.
             serial_number: pick a specific board when more than one is attached.
         """
         self.wheel_radius = wheel_radius
@@ -82,6 +94,13 @@ class ODriveBase:
         self.invert_right = invert_right
         self.max_linear_mps = max_linear_mps
         self.max_accel_mps2 = max_accel_mps2
+        self.friction_ff_nm = friction_ff_nm
+        self.inertia_ff = inertia_ff
+        self._ff = friction_ff_nm > 0 or inertia_ff > 0
+        # Software ramp state (feed-forward mode): wheel setpoints, raw turns/s.
+        self._sp = [0.0, 0.0]            # left, right
+        self._ff_torque = [0.0, 0.0]
+        self._sp_t = None
         self.connect_timeout_s = connect_timeout_s
         self.serial_number = serial_number
 
@@ -157,7 +176,10 @@ class ODriveBase:
 
         for axis in (self.left, self.right):
             axis.controller.config.control_mode = CONTROL_MODE_VELOCITY_CONTROL
-            if self.max_accel_mps2 > 0:
+            if self._ff:
+                axis.controller.config.input_mode = INPUT_MODE_PASSTHROUGH
+                axis.controller.input_torque = 0.0
+            elif self.max_accel_mps2 > 0:
                 axis.controller.config.vel_ramp_rate = self.max_accel_mps2 / self.wheel_circumference
                 axis.controller.config.input_mode = INPUT_MODE_VEL_RAMP
             else:
@@ -276,8 +298,11 @@ class ODriveBase:
             right_mps = -right_mps
 
         # ODrive velocity is in turns/s.
-        self.left.controller.input_vel = left_mps / self.wheel_circumference
-        self.right.controller.input_vel = right_mps / self.wheel_circumference
+        if self._ff:
+            self._send_ff(left_mps / self.wheel_circumference, right_mps / self.wheel_circumference)
+        else:
+            self.left.controller.input_vel = left_mps / self.wheel_circumference
+            self.right.controller.input_vel = right_mps / self.wheel_circumference
         if self._trace:
             self._last_cmd = (x_mps, theta_degps, left_mps / self.wheel_circumference,
                               right_mps / self.wheel_circumference)
@@ -308,6 +333,31 @@ class ODriveBase:
 
         return {"x.vel": x_vel, "theta.vel": math.degrees(theta_rad)}
 
+    # Below this wheel speed the friction feed-forward fades out (tanh), so a
+    # cart told to stand still is not pushed one way or the other.
+    FF_FADE_TPS = 0.03
+
+    def _send_ff(self, left_tps: float, right_tps: float) -> None:
+        """Software ramp + feed-forward, one tick. Raw (signed) turns/s."""
+        now = time.monotonic()
+        dt = 0.0 if self._sp_t is None else min(max(now - self._sp_t, 0.0), 0.1)
+        self._sp_t = now
+        a_max = self.max_accel_mps2 / self.wheel_circumference if self.max_accel_mps2 > 0 else float("inf")
+        for k, (axis, target) in enumerate(((self.left, left_tps), (self.right, right_tps))):
+            sp = self._sp[k]
+            step = target - sp
+            if dt > 0 and a_max != float("inf"):
+                step = max(-a_max * dt, min(a_max * dt, step))
+            elif dt == 0 and a_max != float("inf"):
+                step = 0.0                       # first tick: start from rest
+            new = sp + step
+            accel = step / dt if dt > 0 else 0.0
+            torque = self.inertia_ff * accel + self.friction_ff_nm * math.tanh(new / self.FF_FADE_TPS)
+            self._sp[k] = new
+            self._ff_torque[k] = torque
+            axis.controller.input_vel = new
+            axis.controller.input_torque = torque
+
     def _trace_line(self) -> None:
         now = time.monotonic()
         if now - self._trace_last < 0.2:
@@ -315,15 +365,19 @@ class ODriveBase:
         if self._trace_file is None:
             self._trace_file = open(self._trace_path, "w", buffering=1)
             logger.info("base trace -> %s", os.path.abspath(self._trace_path))
-            print("  t s   x cmd  th cmd |  L cmd  L vel  L A |  R cmd  R vel  R A | states"
-                  "   (wheel columns in turns/s, raw - left is inverted)", file=self._trace_file)
+            print("  t s   x cmd  th cmd |  L cmd  L vel  L A  L ff |  R cmd  R vel  R A  R ff | states"
+                  "   (wheel columns in turns/s, raw - left is inverted; cmd = what the wheel was"
+                  " sent this tick, after any software ramp; ff = feed-forward Nm)", file=self._trace_file)
         self._trace_last = now
         x, th, lc, rc = self._last_cmd
+        if self._ff:
+            lc, rc = self._sp
+        lf, rf = self._ff_torque
         def amps(ax):
             return abs(getattr(ax.motor.current_control, "Iq_measured", float("nan")))
         print(f"{now - self._trace_t0:6.1f} {x:+6.3f} {th:+7.1f} | "
-              f"{lc:+6.2f} {self.left.encoder.vel_estimate:+6.2f} {amps(self.left):4.1f} | "
-              f"{rc:+6.2f} {self.right.encoder.vel_estimate:+6.2f} {amps(self.right):4.1f} | "
+              f"{lc:+6.2f} {self.left.encoder.vel_estimate:+6.2f} {amps(self.left):4.1f} {lf:+5.2f} | "
+              f"{rc:+6.2f} {self.right.encoder.vel_estimate:+6.2f} {amps(self.right):4.1f} {rf:+5.2f} | "
               f"{self.left.current_state},{self.right.current_state}", file=self._trace_file)
 
     def stop(self) -> None:
@@ -331,8 +385,13 @@ class ODriveBase:
         if not self._connected:
             return
         try:
-            self.left.controller.input_vel = 0.0
-            self.right.controller.input_vel = 0.0
+            for axis in (self.left, self.right):
+                if self._ff:
+                    axis.controller.input_torque = 0.0
+                axis.controller.input_vel = 0.0
+            self._sp = [0.0, 0.0]
+            self._ff_torque = [0.0, 0.0]
+            self._sp_t = None
         except Exception as e:
             logger.warning("Failed to stop ODrive wheels: %s", e)
 

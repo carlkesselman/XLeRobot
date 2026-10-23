@@ -359,7 +359,7 @@ def cmd_setup_motors(args) -> int:
         "motor.config.requested_current_range": 25.0,
         "motor.config.current_control_bandwidth": 100.0,
         "motor.config.torque_constant": kt,
-        "motor.config.current_lim": args.current_lim,
+        "motor.config.current_lim": args.current_lim if args.current_lim is not None else 15.0,
         "encoder.config.mode": _enum("ENCODER_MODE_HALL", 1),
         "encoder.config.cpr": cpr,
         "encoder.config.calib_scan_distance": 150.0,
@@ -552,6 +552,8 @@ def cmd_save_gains(args) -> int:
         ax.controller.config.vel_gain, ax.controller.config.vel_integrator_gain = g
         if args.enc_bw is not None:
             ax.encoder.config.bandwidth = args.enc_bw
+        if args.current_lim is not None:
+            ax.motor.config.current_lim = args.current_lim
     time.sleep(0.3)
     o = _save_and_reboot(o, args.timeout)
     ok = True
@@ -560,10 +562,12 @@ def cmd_save_gains(args) -> int:
         good = abs(c.vel_gain - g[0]) < 1e-3 and abs(c.vel_integrator_gain - g[1]) < 1e-3
         if args.enc_bw is not None:
             good &= abs(ax.encoder.config.bandwidth - args.enc_bw) < 1e-3
+        if args.current_lim is not None:
+            good &= abs(ax.motor.config.current_lim - args.current_lim) < 1e-3
         ok &= good
         print(f"  axis{i} ({SIDE[i]}): vel_gain {c.vel_gain:.3f}, vel_integrator_gain "
-              f"{c.vel_integrator_gain:.3f}, encoder bandwidth {ax.encoder.config.bandwidth:g}"
-              f"  {'saved' if good else 'NOT what was written'}")
+              f"{c.vel_integrator_gain:.3f}, encoder bandwidth {ax.encoder.config.bandwidth:g}, "
+              f"current_lim {ax.motor.config.current_lim:g} A  {'saved' if good else 'NOT what was written'}")
     return 0 if ok else 1
 
 
@@ -772,7 +776,9 @@ def main() -> int:
                     help="--calibrate: voltage the resistance test may use (default as configured: 6 V from --setup-motors); "
                          "raises the resistance limit, not the current")
     ap.add_argument("--kv", type=float, default=16.0, help="motor KV, rpm/V (hoverboard-class ~16)")
-    ap.add_argument("--current-lim", type=float, default=15.0, help="motor current limit, A")
+    ap.add_argument("--current-lim", type=float, default=None,
+                    help="motor current limit, A (--setup-motors: 15 if not given; --save-gains: "
+                         "written only if given)")
     ap.add_argument("--vel-limit", type=float, default=10.0, help="turns/s")
     ap.add_argument("--speed", type=float, default=0.5, help="--spin: turns/s (0.5). --push: m/s (default 0.2)")
     ap.add_argument("--seconds", type=float, default=3.0, help="--spin duration")

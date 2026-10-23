@@ -71,6 +71,8 @@ class XLerobot2WheelsODrive(XLerobot):
             invert_right=config.invert_right_wheel,
             max_linear_mps=config.max_linear_mps,
             max_accel_mps2=config.max_accel_mps2,
+            friction_ff_nm=config.friction_ff_nm,
+            inertia_ff=config.inertia_ff,
             connect_timeout_s=config.odrive_connect_timeout_s,
             serial_number=config.odrive_serial_number,
         ) if self._odrive else None

@@ -262,7 +262,8 @@ list with `--help`.
 | **data** | |
 | `./config/dataset-check.sh <repo_id>` | read a recording back: frames, features, a decoded frame per camera as PNG, video files. Picks the newest `<repo_id>_<date>_<time>`. |
 | **base** | |
-| `./config/odrive-check.sh` | the ODESC: config vs the bus limits, `--apply` to write them, `--watch` through a power cut. Motor bring-up: `--halls` (pole pairs), `--setup-motors`, `--calibrate` (drill pack, wheels up), `--spin --axis N`. |
+| `./config/odrive-check.sh` | the ODESC: config vs the bus limits, `--apply` to write them, `--watch` through a power cut. Motor bring-up: `--halls` (pole pairs), `--setup-motors`, `--calibrate` (drill pack, wheels up), `--spin --axis N`. Tuning: `--push` (floor, which limit stops it), `--save-gains`. |
+| `./config/base-characterize.sh` | the base from first principles: `blocks` (motor constant, wheel inertia), `floor` (breakaway, cart inertia, friction vs speed), `design` (current limit, gains, feed-forward, limits - with reasons), `step --candidates` (validate through the teleop code path, pick). |
 | **environment** | |
 | `./config/sync.sh` | sync with the right extras for this machine |
 

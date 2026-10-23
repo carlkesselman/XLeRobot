@@ -33,6 +33,7 @@ this workspace (see `_common.sh`), so no virtualenv needs activating.
 | `leader-link.sh tap\|soak` | the leader stream with no robot: which keys arrive; a graded N-minute link test |
 | `dataset-check.sh` | read a recording back |
 | `odrive-check.sh` | the ODESC: config, apply limits, watch through a power cut |
+| `base-characterize.sh` | measure the base and derive its tuning: blocks, floor, design, step |
 | `ms_clock.py` | **Mac**: millisecond clock for the glass-to-glass lag test |
 
 **Setup and plumbing:** `sync.sh` (the right `uv sync` for this machine),
