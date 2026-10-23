@@ -92,11 +92,15 @@ class ODriveBase:
         self.right: Any = None
         self._connected = False
 
-        # LEROBOT_BASE_TRACE=1: one line every 0.2 s to stderr - the command
-        # as it arrived, what each wheel was asked for, what it did, its
-        # current, and the axis states. For "teleop drives worse than
-        # odrive-check --push does".
-        self._trace = os.environ.get("LEROBOT_BASE_TRACE", "") not in ("", "0")
+        # LEROBOT_BASE_TRACE=1 (or =<file>): one line every 0.2 s - the
+        # command as it arrived, what each wheel was asked for, what it did,
+        # its current, and the axis states - written to base-trace.log in the
+        # current directory (a file: teleop's status line overwrites the
+        # terminal). For "teleop drives worse than odrive-check --push does".
+        tr = os.environ.get("LEROBOT_BASE_TRACE", "")
+        self._trace = tr not in ("", "0")
+        self._trace_path = "base-trace.log" if tr in ("1", "true", "yes") else tr
+        self._trace_file = None
         self._trace_last = 0.0
         self._trace_t0 = time.monotonic()
         self._last_cmd = (0.0, 0.0, 0.0, 0.0)
@@ -308,17 +312,19 @@ class ODriveBase:
         now = time.monotonic()
         if now - self._trace_last < 0.2:
             return
-        if self._trace_last == 0.0:
-            print("base  t s   x cmd  th cmd |  L cmd  L vel  L A |  R cmd  R vel  R A | states",
-                  file=sys.stderr)
+        if self._trace_file is None:
+            self._trace_file = open(self._trace_path, "w", buffering=1)
+            logger.info("base trace -> %s", os.path.abspath(self._trace_path))
+            print("  t s   x cmd  th cmd |  L cmd  L vel  L A |  R cmd  R vel  R A | states"
+                  "   (wheel columns in turns/s, raw - left is inverted)", file=self._trace_file)
         self._trace_last = now
         x, th, lc, rc = self._last_cmd
         def amps(ax):
             return abs(getattr(ax.motor.current_control, "Iq_measured", float("nan")))
-        print(f"base {now - self._trace_t0:6.1f} {x:+6.3f} {th:+7.1f} | "
+        print(f"{now - self._trace_t0:6.1f} {x:+6.3f} {th:+7.1f} | "
               f"{lc:+6.2f} {self.left.encoder.vel_estimate:+6.2f} {amps(self.left):4.1f} | "
               f"{rc:+6.2f} {self.right.encoder.vel_estimate:+6.2f} {amps(self.right):4.1f} | "
-              f"{self.left.current_state},{self.right.current_state}", file=sys.stderr, flush=True)
+              f"{self.left.current_state},{self.right.current_state}", file=self._trace_file)
 
     def stop(self) -> None:
         """Zero both wheels. Safe to call when not connected."""
