@@ -727,11 +727,14 @@ def cmd_step(args) -> int:
         scored.append((r["cand"], fast, slow, over, rise, jit))
         print(f" {r['cand']['name']:<10} {100 * fast:12.0f}% {100 * slow:13.0f}% {100 * over:+8.0f}% "
               f"{rise:5.2f}s {jit:7.2f}A")
-    ok = [x for x in scored if x[3] <= 0.15 and math.isfinite(x[1])] or scored
+    ok = [x for x in scored if x[3] <= 0.15 and math.isfinite(x[1])]
+    why = "lowest ripple at working speeds with overshoot <= 15%, then fastest"
+    if not ok:
+        ok, why = scored, "NONE kept overshoot <= 15% - lowest ripple regardless; look at the table"
     if ok:
         best = min(ok, key=lambda x: (round(x[1], 2), x[4]))
         c = best[0]
-        print(f"\n-> best: {c['name']}  (lowest ripple at working speeds with overshoot <= 15%, then fastest)")
+        print(f"\n-> best: {c['name']}  ({why})")
         if c.get("vel_gain") is not None:
             print(f"   ./config/odrive-check.sh --save-gains --vel-gain {c['vel_gain']} --int-gain {c['int_gain']} "
                   f"--enc-bw {c['enc_bw']}" + (f" --current-lim {design['current_lim']:g}" if design.get("current_lim") else ""))
