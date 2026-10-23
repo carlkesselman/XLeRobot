@@ -535,12 +535,36 @@ def cmd_design(args) -> int:
     P("\n================ BASE DESIGN, from first principles ================")
     P(f"measured: cart inertia {J:.3f} Nm per turn/s^2 per wheel, wheel alone {Jw:.4f}; "
       f"breakaway {tau_b:.2f} Nm, rolling {c:.2f} Nm + {bv:.3f} Nm per turn/s")
-    mass = 2 * (J - Jw) / (2 * math.pi) / (r * r) * (kt_phys / kt)
-    P(f"   -> cart mass as the wheels see it: ~{mass:.0f} kg"
-      + ("" if kts else " (assuming KV 16 - run `blocks` to measure it)"))
-    rr = 2 * c * (kt_phys / kt) / r / (mass * 9.81) if mass > 0 else float("nan")
-    P(f"   -> rolling resistance {2 * c / r * kt_phys / kt:.0f} N total = {rr:.3f} of the weight "
-      "(hard casters on hard floor are typically 0.01-0.03)")
+    # Inertia is measured in ODrive units (configured torque constant), so the
+    # mass it implies scales with true kt / configured kt. A scale reading
+    # therefore measures the true torque constant - independently of `blocks`.
+    mass_odrive = 2 * (J - Jw) / (2 * math.pi) / (r * r)       # as if configured kt were true
+    if args.mass_kg:
+        kt_mass = kt * args.mass_kg / mass_odrive
+        P(f"   -> inertia + scale ({args.mass_kg:g} kg) imply a torque constant of {kt_mass:.3f} Nm/A "
+          f"(KV {8.27 / kt_mass:.1f}); configured {kt:.3f} (KV {8.27 / kt:.1f})"
+          + (f", back-EMF (blocks) {kt_phys:.3f} (KV {8.27 / kt_phys:.1f})" if kts else ""))
+        if kts and abs(kt_mass / kt_phys - 1) > 0.25:
+            P("      The two disagree by more than 25%: torque per amp is lower than the motor's")
+            P("      back-EMF says - suspect the Hall commutation (encoder offset), and recalibrate.")
+        kt_phys = kt_mass if not kts else kt_phys
+        mass = args.mass_kg
+    else:
+        mass = mass_odrive * (kt_phys / kt)
+        P(f"   -> cart mass as the wheels see it: ~{mass:.0f} kg"
+          + ("" if kts else " (assuming KV 16 - run `blocks` to measure it, or pass --mass-kg)"))
+    scale = kt_phys / kt                       # ODrive Nm -> real Nm
+    drag = statistics.mean([a.get("drag_wheel") for a in bl.get("axes", {}).values() if a.get("drag_wheel")] or [0.0])
+    ext = max(c - drag, 0.0)
+    P(f"   -> friction per wheel {c:.2f} Nm: {drag:.2f} inside the motor (blocks coast-down), "
+      f"{ext:.2f} from the floor and casters")
+    rr = 2 * ext * scale / r / (mass * 9.81) if mass > 0 else float("nan")
+    P(f"   -> floor + caster rolling resistance {2 * ext * scale / r:.0f} N = {rr:.3f} of the weight "
+      "(hard casters on a hard floor: 0.01-0.03; carpet 0.05-0.1)")
+    trac = 0.7 * args.drive_share * mass * 9.81
+    P(f"   -> traction, if {100 * args.drive_share:.0f}% of the weight is on the drive wheels and tyre "
+      f"grip is ~0.7: {trac:.0f} N, i.e. {trac * r / 2 / scale + drag:.2f} ODrive Nm per wheel before "
+      "they slip - on a light cart grip, not current, is the obstacle limit")
 
     # 1. current limit: both wheels stalled, copper loss only, from the pack at v_min
     i_pack = math.sqrt(0.9 * v_min * i_bus / (2 * 1.5 * R))
@@ -800,6 +824,10 @@ def main() -> int:
     ap.add_argument("--bw-sweep", type=floats, default=None,
                     help="floor: also measure estimate noise at these encoder bandwidths, e.g. 25,50,100")
     ap.add_argument("--motor-peak", type=float, default=15.0, help="design: motor current ceiling, A")
+    ap.add_argument("--mass-kg", type=float, default=7.5,
+                    help="design: cart mass from a scale (7.5 kg = 16.5 lb, weighed 2026-10-23); 0 = infer")
+    ap.add_argument("--drive-share", type=float, default=0.6,
+                    help="design: fraction of the weight on the drive wheels (traction estimate)")
     ap.add_argument("--accel-cap", type=float, default=1.0, help="design: acceleration cap, m/s^2")
     ap.add_argument("--speed-cap", type=float, default=1.0, help="design: top-speed cap, m/s")
     ap.add_argument("--hold", type=float, default=2.5, help="step: seconds at each speed")
