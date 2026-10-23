@@ -26,6 +26,8 @@ here so the robot class never sees ODrive units.
 
 import logging
 import math
+import os
+import sys
 import time
 from typing import Any
 
@@ -89,6 +91,15 @@ class ODriveBase:
         self.left: Any = None
         self.right: Any = None
         self._connected = False
+
+        # LEROBOT_BASE_TRACE=1: one line every 0.2 s to stderr - the command
+        # as it arrived, what each wheel was asked for, what it did, its
+        # current, and the axis states. For "teleop drives worse than
+        # odrive-check --push does".
+        self._trace = os.environ.get("LEROBOT_BASE_TRACE", "") not in ("", "0")
+        self._trace_last = 0.0
+        self._trace_t0 = time.monotonic()
+        self._last_cmd = (0.0, 0.0, 0.0, 0.0)
 
         # Re-arm bookkeeping. See _ensure_closed_loop().
         self._last_rearm = 0.0
@@ -263,6 +274,9 @@ class ODriveBase:
         # ODrive velocity is in turns/s.
         self.left.controller.input_vel = left_mps / self.wheel_circumference
         self.right.controller.input_vel = right_mps / self.wheel_circumference
+        if self._trace:
+            self._last_cmd = (x_mps, theta_degps, left_mps / self.wheel_circumference,
+                              right_mps / self.wheel_circumference)
 
     def read_body_velocity(self) -> dict[str, float]:
         """Measured body velocity as {"x.vel": m/s, "theta.vel": deg/s}."""
@@ -282,10 +296,29 @@ class ODriveBase:
         if self.invert_right:
             right_mps = -right_mps
 
+        if self._trace:
+            self._trace_line()
+
         x_vel = (left_mps + right_mps) / 2.0
         theta_rad = (right_mps - left_mps) / self.wheelbase
 
         return {"x.vel": x_vel, "theta.vel": math.degrees(theta_rad)}
+
+    def _trace_line(self) -> None:
+        now = time.monotonic()
+        if now - self._trace_last < 0.2:
+            return
+        if self._trace_last == 0.0:
+            print("base  t s   x cmd  th cmd |  L cmd  L vel  L A |  R cmd  R vel  R A | states",
+                  file=sys.stderr)
+        self._trace_last = now
+        x, th, lc, rc = self._last_cmd
+        def amps(ax):
+            return abs(getattr(ax.motor.current_control, "Iq_measured", float("nan")))
+        print(f"base {now - self._trace_t0:6.1f} {x:+6.3f} {th:+7.1f} | "
+              f"{lc:+6.2f} {self.left.encoder.vel_estimate:+6.2f} {amps(self.left):4.1f} | "
+              f"{rc:+6.2f} {self.right.encoder.vel_estimate:+6.2f} {amps(self.right):4.1f} | "
+              f"{self.left.current_state},{self.right.current_state}", file=sys.stderr, flush=True)
 
     def stop(self) -> None:
         """Zero both wheels. Safe to call when not connected."""
