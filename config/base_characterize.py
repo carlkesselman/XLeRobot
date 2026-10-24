@@ -416,7 +416,10 @@ def cmd_floor(args) -> int:
 
         # 2. inertia and rolling friction: two constant torques, both directions
         print("\n--- cart inertia and rolling friction (constant torque, two levels) ---")
-        levels = [min(1.3 * tau_b, 4.0), min(2.0 * tau_b, 6.0)]
+        # Kept close to breakaway: on this light cart (7.5 kg, tilted onto its
+        # casters) 2x breakaway made the wheels slip on carpet. `design` uses the
+        # scale mass instead when it has one, and only checks this against it.
+        levels = [min(1.15 * tau_b, 4.0), min(1.5 * tau_b, 5.0)]
         acc = {}
         for tau in levels:
             alist = []
@@ -572,32 +575,45 @@ def cmd_design(args) -> int:
     tau_b = fl.get("tau_break")
     kts = [a.get("kt_measured") for a in bl.get("axes", {}).values() if a.get("kt_measured")]
     kt_phys = statistics.mean(kts) if kts else kt
-    if J is None or c is None:
+    if c is None or (J is None and not (args.mass_kg and kts)):
         print("floor results incomplete (inertia or friction missing) - rerun `floor`", file=sys.stderr)
         return 1
 
     P = print
     P("\n================ BASE DESIGN, from first principles ================")
-    P(f"measured: cart inertia {J:.3f} Nm per turn/s^2 per wheel, wheel alone {Jw:.4f}; "
-      f"breakaway {tau_b:.2f} Nm, rolling {c:.2f} Nm + {bv:.3f} Nm per turn/s")
-    # Inertia is measured in ODrive units (configured torque constant), so the
-    # mass it implies scales with true kt / configured kt. A scale reading
-    # therefore measures the true torque constant - independently of `blocks`.
-    mass_odrive = 2 * (J - Jw) / (2 * math.pi) / (r * r)       # as if configured kt were true
-    if args.mass_kg:
+    J_meas = J
+    if args.mass_kg and kts:
+        # Scale mass + back-EMF constant + wheel inertia from blocks: the cart's
+        # inertia per wheel, with no floor push needed. Preferred - the floor
+        # torque steps exceed the tyres' grip on this light cart and slip
+        # (2026-10-24, carpet), which reads as a lighter cart.
+        mass = args.mass_kg
+        J = 2 * math.pi * (mass / 2) * r * r * (kt / kt_phys) + Jw
+        P(f"cart inertia {J:.3f} Nm per turn/s^2 per wheel from the scale ({mass:g} kg), the measured "
+          f"motor constant and the wheel ({Jw:.4f})")
+        if J_meas:
+            ratio = J_meas / J
+            P(f"   floor torque steps measured {J_meas:.3f} ({ratio:.2f}x)" + (
+              "   - consistent" if 0.75 <= ratio <= 1.33 else
+              "   - LOW: the wheels slipped during the pushes (or the fit caught the breakaway); ignored"
+              if ratio < 0.75 else
+              "   - HIGH: heavier than weighed, or torque per amp below the back-EMF constant "
+              "(Hall commutation offset - recalibrate)"))
+    elif args.mass_kg:
+        mass_odrive = 2 * (J - Jw) / (2 * math.pi) / (r * r)       # as if configured kt were true
         kt_mass = kt * args.mass_kg / mass_odrive
+        P(f"measured: cart inertia {J:.3f} Nm per turn/s^2 per wheel, wheel alone {Jw:.4f}")
         P(f"   -> inertia + scale ({args.mass_kg:g} kg) imply a torque constant of {kt_mass:.3f} Nm/A "
-          f"(KV {8.27 / kt_mass:.1f}); configured {kt:.3f} (KV {8.27 / kt:.1f})"
-          + (f", back-EMF (blocks) {kt_phys:.3f} (KV {8.27 / kt_phys:.1f})" if kts else ""))
-        if kts and abs(kt_mass / kt_phys - 1) > 0.25:
-            P("      The two disagree by more than 25%: torque per amp is lower than the motor's")
-            P("      back-EMF says - suspect the Hall commutation (encoder offset), and recalibrate.")
-        kt_phys = kt_mass if not kts else kt_phys
+          f"(KV {8.27 / kt_mass:.1f}); configured {kt:.3f} (KV {8.27 / kt:.1f}). Run `blocks` to measure "
+          "it from back-EMF instead - if the wheels slipped in `floor`, this is wrong.")
+        kt_phys = kt_mass
         mass = args.mass_kg
     else:
-        mass = mass_odrive * (kt_phys / kt)
+        mass = 2 * (J - Jw) / (2 * math.pi) / (r * r) * (kt_phys / kt)
+        P(f"measured: cart inertia {J:.3f} Nm per turn/s^2 per wheel, wheel alone {Jw:.4f}")
         P(f"   -> cart mass as the wheels see it: ~{mass:.0f} kg"
           + ("" if kts else " (assuming KV 16 - run `blocks` to measure it, or pass --mass-kg)"))
+    P(f"friction: breakaway {tau_b:.2f} Nm, rolling {c:.2f} Nm + {bv:.3f} Nm per turn/s (per wheel)")
     scale = kt_phys / kt                       # ODrive Nm -> real Nm
     drag = bl_scale * statistics.mean([a.get("drag_wheel") for a in bl.get("axes", {}).values() if a.get("drag_wheel")] or [0.0])
     ext = max(c - drag, 0.0)
