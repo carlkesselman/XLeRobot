@@ -218,6 +218,25 @@ class Board:
                 setattr(_get(dict(self.axes)[i], path), name, v)
             except Exception:  # noqa: BLE001
                 pass
+        # Then reboot. Writing the settings back is not enough: a second
+        # `floor` run in one power-up failed to arm axis1 with OVERSPEED at a
+        # standstill (2026-10-24), and a power cycle cleared it - some state
+        # that is not a setting survives the mode switching. Nothing here is
+        # ever saved to flash, so a reboot puts back exactly the saved
+        # configuration (and drops any trial gains).
+        self.end_errors = self.errors()
+        print("\nrebooting the board to drop every test setting (USB goes away for a few seconds)...")
+        try:
+            self.o.reboot()
+        except Exception:  # noqa: BLE001 - the reboot tears the connection down
+            pass
+        time.sleep(3.0)
+        try:
+            self.o = oc._find(20.0)
+            self.axes = [(0, self.o.axis0), (1, self.o.axis1)]
+            print("board back, saved configuration in force.")
+        except Exception as e:  # noqa: BLE001
+            print(f"board did not come back ({e}) - power-cycle it before the next stage.")
 
     def errors(self) -> dict:
         return {i: oc._fmt_errors(oc._axis_errors(ax)) for i, ax in self.axes}
@@ -335,7 +354,7 @@ def cmd_blocks(args) -> int:
             time.sleep(0.3)
     finally:
         b.restore()
-    print("\nerrors after:", b.errors())
+    print("\nerrors at the end of the test:", getattr(b, "end_errors", None) or b.errors())
     save_model("blocks", out)
     print("\nNext: ./config/base-characterize.sh floor")
     return 0
@@ -508,7 +527,7 @@ def cmd_floor(args) -> int:
         print("\nstopped")
     finally:
         b.restore()
-    print("\nerrors after:", b.errors())
+    print("\nerrors at the end of the test:", getattr(b, "end_errors", None) or b.errors())
     save_model("floor", out)
     print("\nNext: ./config/base-characterize.sh design")
     return 0
