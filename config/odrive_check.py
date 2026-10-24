@@ -48,9 +48,18 @@ import time
 # axis -> wheel. Must match RIGHT_AXIS / LEFT_AXIS in odrive_base.py.
 SIDE = {0: "RIGHT", 1: "LEFT"}
 
-# Velocity gain the cart runs on (saved with --save-gains 2026-10-22); the
-# integrator is 5x. --setup-motors writes these, so a re-setup keeps them.
-TUNED_VEL_GAIN = 8.0
+# Torque constants MEASURED from back-EMF (base-characterize blocks,
+# 2026-10-24): the motors are KV ~23-24, not the 16 assumed at first, so the
+# board's original 0.517 Nm/A overstated torque per amp by ~45%.
+MEASURED_KT = {0: 0.340, 1: 0.363}      # axis0 RIGHT, axis1 LEFT
+
+# Gains --setup-motors writes, in real Nm (with MEASURED_KT): the model's
+# "medium" candidate for the 7.5 kg cart (claude/xlerobot-base-performance.md)
+# until base-characterize step picks the final set. NOT 8 / 40: that loop is
+# faster than the Hall speed estimate supports and made teleop jerky.
+TUNED_VEL_GAIN = 2.7
+TUNED_INT_GAIN = 8.5
+TUNED_ENC_BW = 50.0
 
 TARGET = {
     "brake_resistance": 2.0,                 # the fitted 2 ohm / 50 W
@@ -352,32 +361,33 @@ def cmd_setup_motors(args) -> int:
     o = _find(args.timeout)
     pp, kv = args.pole_pairs, args.kv
     cpr = 6 * pp
-    kt = 8.27 / kv
+    # --kv overrides both axes; otherwise each axis gets its measured constant
+    kts = {i: (8.27 / kv if kv else MEASURED_KT[i]) for i in (0, 1)}
+    kt = kts[0]
     cfg = {
         "motor.config.pole_pairs": pp,
         "motor.config.resistance_calib_max_voltage": 6.0,   # 4 (hoverboard guide) rejects the left wheel at 412 mOhm
         "motor.config.requested_current_range": 25.0,
         "motor.config.current_control_bandwidth": 100.0,
-        "motor.config.torque_constant": kt,
         "motor.config.current_lim": args.current_lim if args.current_lim is not None else 15.0,
         "encoder.config.mode": _enum("ENCODER_MODE_HALL", 1),
         "encoder.config.cpr": cpr,
         "encoder.config.calib_scan_distance": 150.0,
-        "encoder.config.bandwidth": 100.0,
+        "encoder.config.bandwidth": args.enc_bw if args.enc_bw is not None else TUNED_ENC_BW,
         "controller.config.control_mode": _enum("CONTROL_MODE_VELOCITY_CONTROL", 2),
         "controller.config.pos_gain": 1.0,
-        # Tuned on the cart 2026-10-22, not the hoverboard guide's formula
-        # (0.02 / 0.1 * kt * cpr = 0.93 / 4.65 here): at those the cart
-        # stalled at a carpet edge with the motors at 9.4 of 15 A. --vel-gain
-        # overrides; the integrator stays at 5x.
+        # Not the hoverboard guide's formula (0.02 / 0.1 * kt * cpr): at those
+        # the cart stalled at a carpet edge and lurched on every start.
         "controller.config.vel_gain": args.vel_gain if args.vel_gain is not None else TUNED_VEL_GAIN,
         "controller.config.vel_integrator_gain": (args.int_gain if args.int_gain is not None else
-                                                  5.0 * (args.vel_gain if args.vel_gain is not None
-                                                         else TUNED_VEL_GAIN)),
+                                                  (5.0 * args.vel_gain if args.vel_gain is not None
+                                                   else TUNED_INT_GAIN)),
         "controller.config.vel_limit": args.vel_limit,
     }
-    print(f"pole pairs {pp}, KV {kv:g} -> torque constant {kt:.3f} Nm/A, Hall cpr {cpr}\n")
+    print(f"pole pairs {pp}, torque constant {kts[0]:.3f} / {kts[1]:.3f} Nm/A (right / left)"
+          f"{' from --kv' if kv else ' measured'}, Hall cpr {cpr}\n")
     for i, ax in _axes(o, None):
+        ax.motor.config.torque_constant = kts[i]
         for path, v in cfg.items():
             obj = ax
             *parents, leaf = path.split(".")
@@ -542,14 +552,33 @@ def _show_or_try_gains(o, args) -> None:
 
 def cmd_save_gains(args) -> int:
     g = _gains(args)
-    if not g:
-        print("--save-gains needs --vel-gain [--int-gain] [--enc-bw]", file=sys.stderr)
+    kt_new = None
+    if args.kt:
+        v = [float(x) for x in args.kt.split(",")]
+        kt_new = {0: v[0], 1: v[-1]}
+    if not (g or kt_new or args.enc_bw is not None or args.current_lim is not None):
+        print("--save-gains needs --vel-gain [--int-gain], --kt, --enc-bw or --current-lim", file=sys.stderr)
         return 2
     o = _find(args.timeout)
     idle = _enum("AXIS_STATE_IDLE", 1)
+    want = {}
     for i, ax in ((0, o.axis0), (1, o.axis1)):
         ax.requested_state = idle
-        ax.controller.config.vel_gain, ax.controller.config.vel_integrator_gain = g
+        c = ax.controller.config
+        if kt_new:
+            old = ax.motor.config.torque_constant
+            if not g:
+                # Gains are torque per speed error; the board turns torque into
+                # current with torque_constant. Scale them with it so the same
+                # error still gives the same current: nothing moves differently,
+                # only the units become real newton-metres.
+                c.vel_gain *= kt_new[i] / old
+                c.vel_integrator_gain *= kt_new[i] / old
+                print(f"  axis{i}: torque constant {old:.3f} -> {kt_new[i]:.3f}; gains rescaled x{kt_new[i] / old:.3f}")
+            ax.motor.config.torque_constant = kt_new[i]
+        if g:
+            c.vel_gain, c.vel_integrator_gain = g
+        want[i] = (c.vel_gain, c.vel_integrator_gain)
         if args.enc_bw is not None:
             ax.encoder.config.bandwidth = args.enc_bw
         if args.current_lim is not None:
@@ -559,7 +588,9 @@ def cmd_save_gains(args) -> int:
     ok = True
     for i, ax in ((0, o.axis0), (1, o.axis1)):
         c = ax.controller.config
-        good = abs(c.vel_gain - g[0]) < 1e-3 and abs(c.vel_integrator_gain - g[1]) < 1e-3
+        good = abs(c.vel_gain - want[i][0]) < 1e-3 and abs(c.vel_integrator_gain - want[i][1]) < 1e-3
+        if kt_new:
+            good &= abs(ax.motor.config.torque_constant - kt_new[i]) < 1e-4
         if args.enc_bw is not None:
             good &= abs(ax.encoder.config.bandwidth - args.enc_bw) < 1e-3
         if args.current_lim is not None:
@@ -567,7 +598,8 @@ def cmd_save_gains(args) -> int:
         ok &= good
         print(f"  axis{i} ({SIDE[i]}): vel_gain {c.vel_gain:.3f}, vel_integrator_gain "
               f"{c.vel_integrator_gain:.3f}, encoder bandwidth {ax.encoder.config.bandwidth:g}, "
-              f"current_lim {ax.motor.config.current_lim:g} A  {'saved' if good else 'NOT what was written'}")
+              f"current_lim {ax.motor.config.current_lim:g} A, torque constant "
+              f"{ax.motor.config.torque_constant:.3f}  {'saved' if good else 'NOT what was written'}")
     return 0 if ok else 1
 
 
@@ -775,7 +807,11 @@ def main() -> int:
     ap.add_argument("--cal-max-voltage", type=float, default=None,
                     help="--calibrate: voltage the resistance test may use (default as configured: 6 V from --setup-motors); "
                          "raises the resistance limit, not the current")
-    ap.add_argument("--kv", type=float, default=16.0, help="motor KV, rpm/V (hoverboard-class ~16)")
+    ap.add_argument("--kv", type=float, default=None,
+                    help="--setup-motors: motor KV, rpm/V, both axes (default: the measured MEASURED_KT)")
+    ap.add_argument("--kt", type=str, default=None,
+                    help="--save-gains: torque constant Nm/A, one value or right,left (e.g. 0.340,0.363). "
+                         "Without --vel-gain the gains are rescaled so the wheels behave exactly as before")
     ap.add_argument("--current-lim", type=float, default=None,
                     help="motor current limit, A (--setup-motors: 15 if not given; --save-gains: "
                          "written only if given)")

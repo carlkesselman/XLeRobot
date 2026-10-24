@@ -140,7 +140,8 @@ class Board:
              "dc_bus_undervoltage_trip_level": getattr(self.o.config, "dc_bus_undervoltage_trip_level", None)}
         for i, ax in self.axes:
             m, c = ax.motor.config, ax.controller.config
-            d[f"axis{i}"] = {"side": oc.SIDE[i], "phase_resistance": m.phase_resistance,
+            d[f"axis{i}"] = {"side": oc.SIDE[i], "torque_constant": m.torque_constant,
+                             "phase_resistance": m.phase_resistance,
                              "phase_inductance": m.phase_inductance, "current_lim": m.current_lim,
                              "vel_gain": c.vel_gain, "vel_integrator_gain": c.vel_integrator_gain,
                              "encoder_bandwidth": ax.encoder.config.bandwidth}
@@ -264,14 +265,22 @@ def cmd_blocks(args) -> int:
                 print(f"  {w:+.2f} turns/s: {vname} {statistics.mean(vs):+.3f} V, Iq {statistics.mean(qs):+.2f} A")
             b.soft_stop(which=(i,))
             if len(pts) >= 2:
-                lam, _ = linfit([p[0] for p in pts], [p[1] for p in pts])
-                kt_meas = 1.5 * b.pp * lam
+                lam, icpt = linfit([p[0] for p in pts], [p[1] for p in pts])
+                # The sign is the board's direction convention (Vq and Iq both read
+                # negative for positive speed on this cart); the size is the constant.
+                kt_meas = 1.5 * b.pp * abs(lam)
+                kt_cfg = ax.motor.config.torque_constant
                 res["kt_measured"] = kt_meas
                 res["kv_measured"] = 8.27 / kt_meas if kt_meas > 0 else None
-                plaus = 0.1 < kt_meas < 3.0
-                print(f"  motor constant: {kt_meas:.3f} Nm/A (KV {8.27 / kt_meas:.1f}) - configured "
-                      f"{b.kt:.3f} (KV {8.27 / b.kt:.1f})" + ("" if plaus else
-                      f"   IMPLAUSIBLE - {vname} is probably not in volts on this firmware; ignored"))
+                res["backemf_intercept_v"] = icpt
+                plaus = 0.1 < kt_meas < 3.0 and abs(icpt) < 0.5
+                print(f"  motor constant: {kt_meas:.3f} Nm/A (KV {8.27 / kt_meas:.1f}), back-EMF line through "
+                      f"{icpt:+.2f} V at zero speed - configured {kt_cfg:.3f} (KV {8.27 / kt_cfg:.1f})"
+                      + ("" if plaus else
+                         f"   IMPLAUSIBLE - {vname} is probably not in volts on this firmware; ignored"))
+                if plaus and abs(kt_meas / kt_cfg - 1) > 0.1:
+                    print(f"  -> differs by {100 * (kt_meas / kt_cfg - 1):+.0f}%. Set it, keeping behaviour identical:")
+                    print("     ./config/odrive-check.sh --save-gains --kt <right>,<left>   then rerun `blocks`")
                 if not plaus:
                     res["kt_measured"] = None
             else:
@@ -442,7 +451,8 @@ def cmd_floor(args) -> int:
                 t0 = time.time()
                 while time.time() - t0 < 1.0:
                     for i, ax in b.axes:
-                        smp[i].append((fwd[i] * d * ax.encoder.vel_estimate, fwd[i] * d * iq(ax) * b.kt))
+                        smp[i].append((fwd[i] * d * ax.encoder.vel_estimate,
+                                       fwd[i] * d * iq(ax) * ax.motor.config.torque_constant))
                     time.sleep(0.01)
                 for i, ax in b.axes:
                     ax.controller.input_vel = 0.0
@@ -451,7 +461,7 @@ def cmd_floor(args) -> int:
                     vv = [x[0] for x in smp[i]]; tt = [x[1] for x in smp[i]]
                     taus.append(statistics.mean(tt))
                     vsd.append(statistics.pstdev(vv))
-                    isd.append(statistics.pstdev(tt) / b.kt)
+                    isd.append(statistics.pstdev(tt) / dict(b.axes)[i].motor.config.torque_constant)
             row.update(tau=statistics.mean(taus), vel_sd=statistics.mean(vsd), iq_sd=statistics.mean(isd))
             sweep.append(row)
             print(f"  {v_mps:.2f} m/s ({v:.2f} turns/s): torque {row['tau']:.2f} Nm/wheel, speed noise "
@@ -507,7 +517,17 @@ def cmd_design(args) -> int:
         print("no floor measurements yet - run `floor` first", file=sys.stderr)
         return 1
     bd = fl.get("board") or bl.get("board") or {}
-    kt = bd.get("torque_constant", 8.27 / 16)
+
+    def kt_of(board):
+        """Mean configured torque constant of a section's board (per axis since 2026-10-24)."""
+        per = [board.get(f"axis{i}", {}).get("torque_constant") for i in (0, 1)]
+        per = [x for x in per if x]
+        return statistics.mean(per) if per else board.get("torque_constant", 8.27 / 16)
+
+    kt = kt_of(bd)
+    # blocks may have run under a different configured torque constant: its
+    # torques (wheel inertia, drag) are in that run's units - convert to ours
+    bl_scale = kt / kt_of(bl.get("board", {})) if bl.get("board") else 1.0
     r = bd.get("wheel_radius", 0.0825)
     circ = 2 * math.pi * r
     cpr = bd.get("cpr", 90)
@@ -515,7 +535,7 @@ def cmd_design(args) -> int:
     i_bus = bd.get("dc_max_positive_current") or 10.0
     v_min = max(bd.get("dc_bus_undervoltage_trip_level") or 16.5, 16.0)
     J = fl.get("J_cart")
-    Jw = statistics.mean([a.get("J_wheel") for a in bl.get("axes", {}).values() if a.get("J_wheel")] or [0.06])
+    Jw = bl_scale * statistics.mean([a.get("J_wheel") for a in bl.get("axes", {}).values() if a.get("J_wheel")] or [0.06])
     c = fl.get("coulomb")
     bv = fl.get("viscous", 0.0) or 0.0
     if c is None or not math.isfinite(c) or c <= 0:
@@ -554,7 +574,7 @@ def cmd_design(args) -> int:
         P(f"   -> cart mass as the wheels see it: ~{mass:.0f} kg"
           + ("" if kts else " (assuming KV 16 - run `blocks` to measure it, or pass --mass-kg)"))
     scale = kt_phys / kt                       # ODrive Nm -> real Nm
-    drag = statistics.mean([a.get("drag_wheel") for a in bl.get("axes", {}).values() if a.get("drag_wheel")] or [0.0])
+    drag = bl_scale * statistics.mean([a.get("drag_wheel") for a in bl.get("axes", {}).values() if a.get("drag_wheel")] or [0.0])
     ext = max(c - drag, 0.0)
     P(f"   -> friction per wheel {c:.2f} Nm: {drag:.2f} inside the motor (blocks coast-down), "
       f"{ext:.2f} from the floor and casters")
