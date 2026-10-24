@@ -148,18 +148,24 @@ class Board:
         return d
 
     def arm(self, which=(0, 1)) -> None:
-        oc._clear(self.o)
-        for i, ax in self.axes:
-            if i in which:
-                ax.controller.input_torque = 0.0
-                ax.controller.input_vel = 0.0
-                ax.controller.config.input_mode = PASSTHROUGH
-                ax.controller.config.control_mode = VELOCITY
-                ax.requested_state = CLOSED
-        time.sleep(0.5)
-        for i, ax in self.axes:
-            if i in which and ax.current_state != CLOSED:
-                raise RuntimeError(f"axis{i} did not enter closed loop: {oc._fmt_errors(oc._axis_errors(ax))}")
+        for attempt in (1, 2):
+            oc._clear(self.o)
+            for i, ax in self.axes:
+                if i in which:
+                    ax.controller.input_torque = 0.0
+                    ax.controller.input_vel = 0.0
+                    ax.controller.config.input_mode = PASSTHROUGH
+                    ax.controller.config.control_mode = VELOCITY
+                    ax.requested_state = CLOSED
+            time.sleep(0.5)
+            failed = [(i, ax) for i, ax in self.axes if i in which and ax.current_state != CLOSED]
+            if not failed:
+                return
+            for i, ax in failed:
+                print(f"  axis{i} ({oc.SIDE[i]}) did not arm (attempt {attempt}): "
+                      f"{oc._fmt_errors(oc._axis_errors(ax))}, speed estimate {ax.encoder.vel_estimate:+.2f} turns/s")
+        raise RuntimeError("an axis would not enter closed loop twice running. OVERSPEED at a standstill is a "
+                           "speed-estimate spike: run ./config/odrive-check.sh --hall-noise")
 
     def torque_mode(self, ax, vel_limit: float) -> None:
         c = ax.controller.config

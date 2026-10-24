@@ -272,6 +272,11 @@ _ERROR_NAMES = {
     "encoder": {0x1: "UNSTABLE_GAIN", 0x2: "CPR_POLEPAIRS_MISMATCH", 0x4: "NO_RESPONSE",
                 0x8: "UNSUPPORTED_ENCODER_MODE", 0x10: "ILLEGAL_HALL_STATE",
                 0x20: "INDEX_NOT_FOUND_YET", 0x100: "HALL_NOT_CALIBRATED_YET"},
+    # OVERSPEED = |speed estimate| > vel_limit x vel_limit_tolerance. At a
+    # standstill that is a speed-estimate spike - Hall noise or a loose Hall
+    # contact (see --hall-noise). It also latches motor CONTROL_DEADLINE_MISSED.
+    "controller": {0x1: "OVERSPEED", 0x2: "INVALID_INPUT_MODE", 0x4: "UNSTABLE_GAIN",
+                   0x20: "INVALID_ESTIMATE"},
 }
 
 
@@ -352,6 +357,67 @@ def cmd_halls(args) -> int:
         else:
             print("\nthe two do not agree, or are not whole numbers - repeat, counting more carefully")
     return 0
+
+
+def cmd_hall_noise(args) -> int:
+    """Wheels still: does the Hall count move when nothing does?
+
+    A stationary wheel's count should not change, or flicker by one if it
+    happens to rest on a Hall edge. More than that - jumps, runs of changes,
+    illegal states - is noise or a loose contact, and the speed estimate turns
+    each jump into a spike (OVERSPEED faults at a standstill). Wiggle each
+    wheel's Hall wires and connectors during the run to find the bad one.
+    """
+    o = _find(args.timeout)
+    print(f"Hall noise: {args.seconds:g} s with BOTH WHEELS STILL (no current flows).")
+    print("For the second half, wiggle the Hall wires and plugs of one wheel, then the other.")
+    if not _yes("Start?"):
+        return 1
+    axes = [(0, o.axis0), (1, o.axis1)]
+    start = {i: ax.encoder.shadow_count for i, ax in axes}
+    last = dict(start)
+    states = {i: set() for i, _ in axes}
+    changes = {i: 0 for i, _ in axes}
+    span = {i: [0, 0] for i, _ in axes}
+    vmax = {i: 0.0 for i, _ in axes}
+    events = {i: [] for i, _ in axes}
+    t0 = time.time()
+    half = False
+    while time.time() - t0 < args.seconds:
+        t = time.time() - t0
+        if not half and t > args.seconds / 2:
+            half = True
+            print("  -> now wiggle the Hall wires")
+        for i, ax in axes:
+            c = ax.encoder.shadow_count
+            st_ = getattr(ax.encoder, "hall_state", None)
+            if st_ is not None:
+                states[i].add(int(st_))
+            vmax[i] = max(vmax[i], abs(ax.encoder.vel_estimate))
+            if c != last[i]:
+                changes[i] += 1
+                if len(events[i]) < 12:
+                    events[i].append(f"{t:5.2f}s {c - last[i]:+d}")
+                last[i] = c
+            d = c - start[i]
+            span[i] = [min(span[i][0], d), max(span[i][1], d)]
+    ok = True
+    for i, _ in axes:
+        bad = states[i] & {0, 7}
+        quiet = changes[i] == 0 or (span[i][1] - span[i][0] <= 1 and changes[i] < 20)
+        ok &= quiet and not bad
+        print(f"\naxis{i} ({SIDE[i]}): {changes[i]} count changes, range {span[i][0]:+d}..{span[i][1]:+d}, "
+              f"Hall states {sorted(states[i])}, peak speed estimate {vmax[i]:.2f} turns/s")
+        if events[i]:
+            print("   first changes: " + ", ".join(events[i]))
+        if bad:
+            print(f"   ILLEGAL Hall state(s) {sorted(bad)}: a Hall line is open or unpowered at moments")
+        if not quiet:
+            print("   NOISY: a still wheel's count moved. If it only moved while you wiggled, that is a")
+            print("   loose contact - reseat or replace the Dupont jumpers on this wheel's Hall plug.")
+            print("   If it moved untouched, it is electrical noise: 22 nF from each Hall line to GND.")
+    print("\nPASS - both still wheels read still" if ok else "\nFAIL - see above")
+    return 0 if ok else 1
 
 
 def cmd_setup_motors(args) -> int:
@@ -789,6 +855,8 @@ def main() -> int:
     g.add_argument("--apply", action="store_true", help="write the bus limits, save, reboot, verify")
     g.add_argument("--watch", action="store_true", help="poll until Ctrl-C; report loss and return")
     g.add_argument("--halls", action="store_true", help="count Hall edges over one hand-turned revolution")
+    g.add_argument("--hall-noise", action="store_true",
+                   help="wheels still: does the Hall count move anyway? (--seconds, default 20)")
     g.add_argument("--setup-motors", action="store_true", help="write the hub-motor config, save, reboot")
     g.add_argument("--calibrate", action="store_true", help="motor + Hall calibration (drill pack, wheels up)")
     g.add_argument("--spin", action="store_true", help="closed-loop velocity test on one axis")
@@ -827,6 +895,10 @@ def main() -> int:
             return cmd_watch(args)
         if args.halls:
             return cmd_halls(args)
+        if args.hall_noise:
+            if args.seconds == 3.0:
+                args.seconds = 20.0
+            return cmd_hall_noise(args)
         if args.setup_motors:
             return cmd_setup_motors(args)
         if args.calibrate:
