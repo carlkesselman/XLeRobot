@@ -707,8 +707,9 @@ def cmd_design(args) -> int:
       f"({'above' if kp / Jw > wb / 2 else 'below'} wb/2): blocks will look "
       f"{'lively or buzzy - expected, ignore' if kp / Jw > wb / 2 else 'calm'}.")
     v_cmd = 0.2 / circ
-    t_full = (tau_max - 0.9 * c - kp * v_cmd) / (ki * v_cmd) if ki > 0 else float("inf")
-    P(f"   Stalled at an edge while commanding 0.2 m/s: feed-forward {0.9 * c:.2f} + Kp x error "
+    ff_pre = round(0.9 * drag, 2) if (args.ff_basis == "motor" and drag > 0) else round(0.9 * c, 2)
+    t_full = (tau_max - ff_pre - kp * v_cmd) / (ki * v_cmd) if ki > 0 else float("inf")
+    P(f"   Stalled at an edge while commanding 0.2 m/s: feed-forward {ff_pre:.2f} + Kp x error "
       f"{kp * v_cmd:.2f} Nm at once, full {tau_max:.2f} Nm after {max(t_full, 0):.1f} s.")
 
     # 3. feed-forward
