@@ -885,8 +885,9 @@ def main() -> int:
     ap.add_argument("--bw-sweep", type=floats, default=None,
                     help="floor: also measure estimate noise at these encoder bandwidths, e.g. 25,50,100")
     ap.add_argument("--motor-peak", type=float, default=15.0, help="design: motor current ceiling, A")
-    ap.add_argument("--mass-kg", type=float, default=7.5,
-                    help="design: cart mass from a scale (7.5 kg = 16.5 lb, weighed 2026-10-23); 0 = infer")
+    ap.add_argument("--mass-kg", type=float, default=17.2,
+                    help="design: cart mass from a scale (17.2 kg = 38 lb, complete cart with the new casters, "
+                         "weighed 2026-10-25; the earlier 16.5 lb was not the whole cart); 0 = infer")
     ap.add_argument("--drive-share", type=float, default=0.6,
                     help="design: fraction of the weight on the drive wheels (traction estimate)")
     ap.add_argument("--accel-cap", type=float, default=1.0, help="design: acceleration cap, m/s^2")

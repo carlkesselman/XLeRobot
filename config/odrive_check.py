@@ -54,11 +54,10 @@ SIDE = {0: "RIGHT", 1: "LEFT"}
 MEASURED_KT = {0: 0.340, 1: 0.363}      # axis0 RIGHT, axis1 LEFT
 
 # Gains --setup-motors writes, in real Nm (with MEASURED_KT): the model's
-# "medium" candidate for the 7.5 kg cart (claude/xlerobot-base-performance.md)
-# until base-characterize step picks the final set. NOT 8 / 40: that loop is
-# faster than the Hall speed estimate supports and made teleop jerky.
-TUNED_VEL_GAIN = 2.7
-TUNED_INT_GAIN = 8.5
+# "medium" candidate for the 17.2 kg cart (claude/xlerobot-base-performance.md)
+# until base-characterize step picks the final set.
+TUNED_VEL_GAIN = 5.2
+TUNED_INT_GAIN = 16.3
 TUNED_ENC_BW = 50.0
 
 TARGET = {
