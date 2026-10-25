@@ -48,10 +48,12 @@ import time
 # axis -> wheel. Must match RIGHT_AXIS / LEFT_AXIS in odrive_base.py.
 SIDE = {0: "RIGHT", 1: "LEFT"}
 
-# Torque constants MEASURED from back-EMF (base-characterize blocks,
-# 2026-10-24): the motors are KV ~23-24, not the 16 assumed at first, so the
-# board's original 0.517 Nm/A overstated torque per amp by ~45%.
-MEASURED_KT = {0: 0.340, 1: 0.363}      # axis0 RIGHT, axis1 LEFT
+# Torque constants MEASURED from back-EMF (base-characterize blocks): the
+# motors are KV ~22, not the 16 assumed at first, so the board's original
+# 0.517 Nm/A overstated torque per amp by ~40%. 2026-10-25, gentle gains, five
+# speeds, rms residual 0.003 V; the 2026-10-24 values (0.340 / 0.363) came from
+# three noisier points.
+MEASURED_KT = {0: 0.371, 1: 0.379}      # axis0 RIGHT, axis1 LEFT
 
 # Gains --setup-motors writes, in real Nm (with MEASURED_KT): the model's
 # "medium" candidate for the 17.2 kg cart (claude/xlerobot-base-performance.md)
@@ -877,7 +879,7 @@ def main() -> int:
     ap.add_argument("--kv", type=float, default=None,
                     help="--setup-motors: motor KV, rpm/V, both axes (default: the measured MEASURED_KT)")
     ap.add_argument("--kt", type=str, default=None,
-                    help="--save-gains: torque constant Nm/A, one value or right,left (e.g. 0.340,0.363). "
+                    help="--save-gains: torque constant Nm/A, one value or right,left (e.g. 0.371,0.379). "
                          "Without --vel-gain the gains are rescaled so the wheels behave exactly as before")
     ap.add_argument("--current-lim", type=float, default=None,
                     help="motor current limit, A (--setup-motors: 15 if not given; --save-gains: "
