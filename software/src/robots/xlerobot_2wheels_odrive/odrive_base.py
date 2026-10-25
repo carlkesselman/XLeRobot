@@ -204,8 +204,8 @@ class ODriveBase:
         if any(errors.values()):
             raise ConnectionError(
                 f"ODrive axes reported errors after entering closed loop: "
-                f"{ {k: hex(v) for k, v in errors.items()} }. "
-                "The motors most likely need encoder calibration - see the ODrive docs."
+                f"{ {k: hex(v) for k, v in errors.items()} } - {self._explain(errors)}"
+                " Details: ./config/odrive-check.sh"
             )
 
         self._connected = True
@@ -236,6 +236,28 @@ class ODriveBase:
             "left": getattr(self.left, "error", 0),
             "right": getattr(self.right, "error", 0),
         }
+
+    @staticmethod
+    def _explain(errors: dict) -> str:
+        """The likely cause of an axis error word, in words (fw 0.5.x bits)."""
+        bits = 0
+        for v in errors.values():
+            bits |= int(v or 0)
+        if bits & 0x30:
+            return ("BRAKE_RESISTOR / MOTOR_DISARMED: the board latched a DC-bus fault (over-voltage, or "
+                    "regen beyond dc_max_negative_current - an abrupt stop or an impact can do it). Only a "
+                    "power cycle of the ODESC clears it.")
+        if bits & 0x6:
+            return "DC bus under/over voltage: check the pack and the XH-M609."
+        if bits & 0x800:
+            return "WATCHDOG_TIMER_EXPIRED: nothing fed the watchdog in time."
+        if bits & 0x100:
+            return "ENCODER_FAILED: Hall wiring, or the encoder needs calibrating (odrive-check --calibrate)."
+        if bits & 0x40:
+            return "MOTOR_FAILED: a phase connection, or the motor needs calibrating (odrive-check --calibrate)."
+        if bits & 0x200:
+            return "CONTROLLER_FAILED (e.g. OVERSPEED): see odrive-check."
+        return "see odrive-check."
 
     # Re-arm no more often than this, so a board that keeps faulting is not
     # hammered with requests at the control rate.

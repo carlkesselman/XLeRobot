@@ -274,7 +274,12 @@ def _axis_errors(ax) -> dict[str, int]:
 # The 0.5.x codes this bring-up actually meets, so the output says what
 # happened instead of a hex word to look up.
 _ERROR_NAMES = {
-    "axis": {0x1: "INVALID_STATE", 0x40: "MOTOR_FAILED", 0x100: "ENCODER_FAILED",
+    # 0x10 / 0x20 together: the board latched a DC-bus fault (over-voltage, or
+    # regen beyond dc_max_negative_current), disarmed the brake resistor and
+    # every motor; only a reboot / power cycle clears it.
+    "axis": {0x1: "INVALID_STATE", 0x2: "DC_BUS_UNDER_VOLTAGE", 0x4: "DC_BUS_OVER_VOLTAGE",
+             0x8: "CURRENT_MEASUREMENT_TIMEOUT", 0x10: "BRAKE_RESISTOR_DISARMED",
+             0x20: "MOTOR_DISARMED", 0x40: "MOTOR_FAILED", 0x100: "ENCODER_FAILED",
              0x200: "CONTROLLER_FAILED", 0x800: "WATCHDOG_TIMER_EXPIRED"},
     "motor": {0x1: "PHASE_RESISTANCE_OUT_OF_RANGE", 0x2: "PHASE_INDUCTANCE_OUT_OF_RANGE",
               0x8: "DRV_FAULT", 0x10: "CONTROL_DEADLINE_MISSED", 0x80: "MODULATION_MAGNITUDE",
