@@ -54,6 +54,7 @@ class ODriveBase:
         max_accel_mps2: float = 1.0,
         friction_ff_nm: float = 0.0,
         inertia_ff: float = 0.0,
+        watchdog_s: float = 0.5,
         connect_timeout_s: int = 30,
         serial_number: str | None = None,
     ):
@@ -76,6 +77,13 @@ class ODriveBase:
                 ramp smooths the command without softening the controller's
                 response to a load. It applies to stops too: from 0.5 m/s at
                 1.0 m/s^2 the wheels take 0.5 s and ~12 cm. 0 = passthrough.
+            watchdog_s: the ODrive's own watchdog. If nothing feeds it for this
+                long the board drops the axes to IDLE and the wheels coast (motor
+                drag stops the cart in well under a metre from 1 m/s). Armed on
+                the first command, fed on every read and command; the program
+                stalling or dying without its cleanup can then not leave the
+                wheels driving. 0 = off (the robot loop was the only watchdog
+                until 2026-10-25).
             friction_ff_nm / inertia_ff: feed-forward torque, per wheel, from
                 config/base_characterize.py. Hall feedback is too coarse at
                 low speed (one count per 5.8 mm of travel) for the velocity
@@ -96,6 +104,9 @@ class ODriveBase:
         self.max_accel_mps2 = max_accel_mps2
         self.friction_ff_nm = friction_ff_nm
         self.inertia_ff = inertia_ff
+        self.watchdog_s = watchdog_s
+        self._wd_armed = False
+        self._wd_last = 0.0
         self._ff = friction_ff_nm > 0 or inertia_ff > 0
         # Software ramp state (feed-forward mode): wheel setpoints, raw turns/s.
         self._sp = [0.0, 0.0]            # left, right
@@ -184,8 +195,9 @@ class ODriveBase:
                 axis.controller.config.input_mode = INPUT_MODE_VEL_RAMP
             else:
                 axis.controller.config.input_mode = INPUT_MODE_PASSTHROUGH
-            # The robot's own control loop is the watchdog; ODrive's would trip
-            # on any pause in the lerobot loop.
+            # Off while connecting; armed on the first command (_feed_watchdog),
+            # so the gap between connect() and the first teleop tick (~1 s)
+            # cannot trip it.
             axis.config.enable_watchdog = False
 
         errors = self._enter_closed_loop(settle_s=0.5)
@@ -209,6 +221,11 @@ class ODriveBase:
 
         for axis in (self.left, self.right):
             axis.clear_errors()
+            if self._wd_armed:
+                try:
+                    axis.watchdog_feed()
+                except Exception:  # noqa: BLE001
+                    pass
         if clear_sleep_s:
             time.sleep(clear_sleep_s)
         for axis in (self.left, self.right):
@@ -278,10 +295,34 @@ class ODriveBase:
         else:
             logger.info("ODrive re-arm requested; next read confirms")
 
+    def _feed_watchdog(self, arm: bool = False) -> None:
+        """Feed the board's watchdog (at most every 50 ms); arm it on the first command."""
+        if self.watchdog_s <= 0:
+            return
+        now = time.monotonic()
+        if not self._wd_armed and not arm:
+            return
+        if self._wd_armed and now - self._wd_last < 0.05:
+            return
+        try:
+            for axis in (self.left, self.right):
+                axis.watchdog_feed()
+            if not self._wd_armed:
+                for axis in (self.left, self.right):
+                    axis.config.watchdog_timeout = self.watchdog_s
+                    axis.watchdog_feed()
+                    axis.config.enable_watchdog = True
+                self._wd_armed = True
+                logger.info("ODrive watchdog armed: %.2f s without a command and the wheels coast", self.watchdog_s)
+            self._wd_last = now
+        except Exception as e:  # noqa: BLE001
+            logger.warning("ODrive watchdog feed failed: %s", e)
+
     def send_body_velocity(self, x_mps: float, theta_degps: float) -> None:
         """Command a body velocity. x in m/s, theta in deg/s (positive = left turn)."""
         if not self._connected:
             raise ConnectionError("ODriveBase is not connected")
+        self._feed_watchdog(arm=True)
 
         theta_rad = math.radians(theta_degps)
 
@@ -312,6 +353,7 @@ class ODriveBase:
         if not self._connected:
             raise ConnectionError("ODriveBase is not connected")
 
+        self._feed_watchdog()
         # Every tick: if the board rebooted or faulted out of closed loop,
         # get it back before reporting a velocity nobody is controlling.
         self._ensure_closed_loop()
@@ -400,6 +442,13 @@ class ODriveBase:
         if not self._connected:
             return
         self.stop()
+        try:
+            # leave the board as other tools expect it: no watchdog
+            for axis in (self.left, self.right):
+                axis.config.enable_watchdog = False
+            self._wd_armed = False
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Failed to disarm the ODrive watchdog: %s", e)
         try:
             from odrive.enums import AXIS_STATE_IDLE
 

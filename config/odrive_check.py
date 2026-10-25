@@ -75,7 +75,16 @@ TARGET = {
 
 def _find(timeout: float):
     import odrive
-    return odrive.find_any(timeout=timeout)
+    o = odrive.find_any(timeout=timeout)
+    # The robot arms the board's watchdog while it drives. A robot process that
+    # died without disconnecting leaves it armed, and these tools do not feed
+    # it: disarm (RAM only - it is never saved).
+    for ax in (o.axis0, o.axis1):
+        try:
+            ax.config.enable_watchdog = False
+        except Exception:  # noqa: BLE001
+            pass
+    return o
 
 
 def _report(o) -> bool:

@@ -67,6 +67,10 @@ robot:
   # Reasoning: claude/xlerobot-base-performance.md in the XLeRobot project.
   friction_ff_nm: 0.36
   inertia_ff: 0.419
+  # The ODESC's own watchdog: 0.5 s without a command from this program and
+  # the board drops the wheels to IDLE (they coast; motor drag stops the cart
+  # within ~0.6 m from 1 m/s). Backstop for a stall or a killed process.
+  odrive_watchdog_s: 0.5
 
   disable_torque_on_disconnect: true
 

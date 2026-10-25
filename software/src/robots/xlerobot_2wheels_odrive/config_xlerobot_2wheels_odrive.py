@@ -98,6 +98,10 @@ class XLerobot2WheelsODriveConfig(XLerobotConfig):
     friction_ff_nm: float = 0.0
     inertia_ff: float = 0.0
 
+    # The board's own watchdog: this long without a command and the wheels
+    # coast. Backstop for a stalled or killed program. 0 = off.
+    odrive_watchdog_s: float = 0.5
+
     odrive_connect_timeout_s: int = 30
     # Set when more than one ODrive is attached; None takes the first found.
     odrive_serial_number: str | None = None
