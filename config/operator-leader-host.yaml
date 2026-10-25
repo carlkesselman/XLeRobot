@@ -98,3 +98,10 @@ invert_hat_tilt: true     # hat says +1 for up; head_motor_2 decreases to raise
 button_head_modifier: 4   # L1 - unused while hat_head >= 0
 button_speed_up: 5        # R1
 button_speed_down: 6      # L2 - a button on this pad, not an axis
+
+# Base speed at full stick, m/s, before the R1/L2 scale (0.25-2.0, starts at
+# 1.0). From base-characterize design (2026-10-25): 0.6 at full stick, 1.0 at
+# the top of the scale = the cart's max_linear_mps. Below ~0.15 m/s the Hall
+# sensors make any setting rough; use a gentle stick, not the 0.25 scale, for
+# slow approaches.
+base_speed_mps: 0.6

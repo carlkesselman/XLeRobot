@@ -52,9 +52,21 @@ robot:
   # If forward drives the robot in a circle, one of these is wrong.
   invert_left_wheel: true
   invert_right_wheel: false
-  # Per-wheel clamp, m/s. Keep it low until the directions are proven.
-  max_linear_mps: 0.5
-  max_accel_mps2: 1.0       # ODrive velocity ramp: smooth teleop at vel_gain 8. 0 = off
+  # Speed and acceleration, per wheel - config/base-characterize.sh design,
+  # validated by `step --candidates` on rug and hardwood (2026-10-25). From
+  # 1.0 m/s at 1.0 m/s^2 the cart stops in 0.5 s and ~0.5 m. Raise the
+  # acceleration only after a brake-from-top-speed test with the arms up.
+  max_linear_mps: 1.0
+  max_accel_mps2: 1.0
+  # Feed-forward torque per wheel, in real Nm (the board has the measured
+  # torque constants). Friction: 90% of the motors' own drag (0.40 Nm) only,
+  # so it is right on rugs and hardwood alike - sized on the rug (0.69) it
+  # would surge on hardwood. Inertia: 0.419 Nm per turn/s^2, the 17.2 kg cart.
+  # Either > 0 moves the ramp into odrive_base. Board gains (saved on the
+  # ODESC, not here): 5.2 / 16.3 at encoder bandwidth 50, current_lim 10.5 A.
+  # Reasoning: claude/xlerobot-base-performance.md in the XLeRobot project.
+  friction_ff_nm: 0.36
+  inertia_ff: 0.419
 
   disable_torque_on_disconnect: true
 
