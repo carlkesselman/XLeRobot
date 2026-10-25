@@ -271,12 +271,19 @@ def cmd_blocks(args) -> int:
             R = ax.motor.config.phase_resistance
             pts = []
             vname = None
-            for v in (1.0, 2.0, 3.0):
+            # Gentle gains for this part only (the reboot at the end restores
+            # the saved ones). With the floor gains a free wheel's loop is ~9x
+            # livelier than on the floor, and its jitter gets into the voltage
+            # this reads: on 2026-10-25 vel_gain 5.2 turned a clean 0.363 into a
+            # crooked 0.311 for the left motor.
+            ax.controller.config.vel_gain = 0.6
+            ax.controller.config.vel_integrator_gain = 1.5
+            for v in (1.0, 1.5, 2.0, 2.5, 3.0):
                 ax.controller.input_vel = v
-                time.sleep(1.2)
+                time.sleep(1.5)
                 vs, qs, ws = [], [], []
                 t0 = time.time()
-                while time.time() - t0 < 0.8:
+                while time.time() - t0 < 1.2:
                     val, vname = vq(ax)
                     if val is None:
                         break
@@ -298,12 +305,17 @@ def cmd_blocks(args) -> int:
                 res["kt_measured"] = kt_meas
                 res["kv_measured"] = 8.27 / kt_meas if kt_meas > 0 else None
                 res["backemf_intercept_v"] = icpt
-                plaus = 0.1 < kt_meas < 3.0 and abs(icpt) < 0.5
+                resid = [p_[1] - (lam * p_[0] + icpt) for p_ in pts]
+                rms = (sum(x * x for x in resid) / len(resid)) ** 0.5
+                res["backemf_rms_v"] = rms
+                print(f"  fit: {len(pts)} points, rms residual {rms:.3f} V"
+                      + ("" if rms < 0.06 else "   - crooked: treat this constant with suspicion, rerun"))
+                plaus = 0.1 < kt_meas < 3.0 and abs(icpt) < 0.5 and rms < 0.15
                 print(f"  motor constant: {kt_meas:.3f} Nm/A (KV {8.27 / kt_meas:.1f}), back-EMF line through "
                       f"{icpt:+.2f} V at zero speed - configured {kt_cfg:.3f} (KV {8.27 / kt_cfg:.1f})"
                       + ("" if plaus else
                          f"   IMPLAUSIBLE - {vname} is probably not in volts on this firmware; ignored"))
-                if plaus and abs(kt_meas / kt_cfg - 1) > 0.1:
+                if plaus and rms < 0.06 and abs(kt_meas / kt_cfg - 1) > 0.1:
                     print(f"  -> differs by {100 * (kt_meas / kt_cfg - 1):+.0f}%. Set it, keeping behaviour identical:")
                     print("     ./config/odrive-check.sh --save-gains --kt <right>,<left>   then rerun `blocks`")
                 if not plaus:
