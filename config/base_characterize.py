@@ -402,12 +402,20 @@ def cmd_floor(args) -> int:
         # 1. breakaway: ramp torque slowly until the cart moves, each direction
         print("\n--- breakaway torque (ramped 0.8 Nm/s until the cart moves) ---")
         brk = []
+        # The sign of the measured current relative to the torque asked for:
+        # on this board Iq reads NEGATIVE for positive torque and speed (seen
+        # in the back-EMF test). Learnt here, used to turn current into torque.
+        votes = {0: 0, 1: 0}
         for d in (+1, -1):
             to_torque_mode()
             t0 = time.time(); tau = 0.0; moving = 0
             while tau < 6.0:
                 tau = 0.8 * (time.time() - t0)
                 set_torque(d * tau)
+                if tau > 0.3:
+                    for i, ax in b.axes:
+                        q = iq(ax) * fwd[i] * d
+                        votes[i] += 1 if q > 0 else -1 if q < 0 else 0
                 moving = moving + 1 if d * cart_speed() > 0.05 else 0
                 if moving >= 3:
                     break
@@ -423,6 +431,9 @@ def cmd_floor(args) -> int:
         if not brk:
             print("no breakaway - stopping.")
             return 1
+        iq_sign = {i: (1.0 if votes[i] >= 0 else -1.0) for i in (0, 1)}
+        out["iq_sign"] = iq_sign
+        print(f"  current sign vs torque: right {iq_sign[0]:+.0f}, left {iq_sign[1]:+.0f}")
         tau_b = statistics.mean(brk)
         out["tau_break"] = tau_b
 
@@ -431,7 +442,7 @@ def cmd_floor(args) -> int:
         # Kept close to breakaway: on this light cart (7.5 kg, tilted onto its
         # casters) 2x breakaway made the wheels slip on carpet. `design` uses the
         # scale mass instead when it has one, and only checks this against it.
-        levels = [min(1.15 * tau_b, 4.0), min(1.5 * tau_b, 5.0)]
+        levels = [min(max(1.15 * tau_b, tau_b + 0.4), 4.0), min(max(1.5 * tau_b, tau_b + 0.8), 5.0)]
         acc = {}
         for tau in levels:
             alist = []
@@ -458,6 +469,7 @@ def cmd_floor(args) -> int:
                 print(f"  {tau:.2f} Nm {'fwd ' if d > 0 else 'back'}: {a:.2f} turns/s^2")
             if alist:
                 acc[tau] = statistics.mean(alist)
+        out["accel_levels"] = {f"{t:.3f}": a_ for t, a_ in acc.items()}
         if len(acc) == 2:
             (t1, a1), (t2, a2) = sorted(acc.items())
             J = (t2 - t1) / (a2 - a1) if a2 != a1 else float("nan")
@@ -492,7 +504,7 @@ def cmd_floor(args) -> int:
                 while time.time() - t0 < 1.0:
                     for i, ax in b.axes:
                         smp[i].append((fwd[i] * d * ax.encoder.vel_estimate,
-                                       fwd[i] * d * iq(ax) * ax.motor.config.torque_constant))
+                                       iq_sign[i] * fwd[i] * d * iq(ax) * ax.motor.config.torque_constant))
                     time.sleep(0.01)
                 for i, ax in b.axes:
                     ax.controller.input_vel = 0.0
@@ -576,13 +588,24 @@ def cmd_design(args) -> int:
     v_min = max(bd.get("dc_bus_undervoltage_trip_level") or 16.5, 16.0)
     J = fl.get("J_cart")
     Jw = bl_scale * statistics.mean([a.get("J_wheel") for a in bl.get("axes", {}).values() if a.get("J_wheel")] or [0.06])
-    c = fl.get("coulomb")
-    bv = fl.get("viscous", 0.0) or 0.0
-    if c is None or not math.isfinite(c) or c <= 0:
-        sw = fl.get("sweep") or []
-        c = min(sw, key=lambda r_: r_["v_mps"])["tau"] if sw else fl.get("tau_roll_accel")
-        bv = 0.0
-    if not math.isfinite(bv) or bv < 0:
+    # Friction from the speed sweep, as magnitudes (runs before 2026-10-25 stored
+    # them with the board's current sign, i.e. negative).
+    sw = fl.get("sweep") or []
+    taus = [(r_["v_tps"], abs(r_["tau"])) for r_ in sw if math.isfinite(r_.get("tau", float("nan")))]
+    if len(taus) >= 2:
+        bv, c0 = linfit([t_[0] for t_ in taus], [t_[1] for t_ in taus])
+    else:
+        c0, bv = abs(fl.get("coulomb") or fl.get("tau_roll_accel") or 0.0), 0.0
+    if taus:
+        # The feed-forward must never exceed the friction at any working speed,
+        # or it pushes: base it on the lowest. Friction that FALLS with speed
+        # (casters still swivelling, stiction - Stribeck) is left to the loop
+        # at crawl speeds.
+        c = min(t_[1] for t_ in taus)
+        c_hi = max(t_[1] for t_ in taus)
+    else:
+        c, c_hi = c0, c0
+    if not math.isfinite(bv):
         bv = 0.0
     tau_b = fl.get("tau_break")
     kts = [a.get("kt_measured") for a in bl.get("axes", {}).values() if a.get("kt_measured")]
@@ -625,7 +648,13 @@ def cmd_design(args) -> int:
         P(f"measured: cart inertia {J:.3f} Nm per turn/s^2 per wheel, wheel alone {Jw:.4f}")
         P(f"   -> cart mass as the wheels see it: ~{mass:.0f} kg"
           + ("" if kts else " (assuming KV 16 - run `blocks` to measure it, or pass --mass-kg)"))
-    P(f"friction: breakaway {tau_b:.2f} Nm, rolling {c:.2f} Nm + {bv:.3f} Nm per turn/s (per wheel)")
+    P(f"friction per wheel: breakaway {tau_b:.2f} Nm; rolling {c_hi:.2f} Nm at the slowest speed, {c:.2f} at the "
+      f"lowest point" + (f" - FALLS with speed ({bv:+.2f} Nm per turn/s): Stribeck / caster swivel"
+                         if bv < -0.02 else f" ({bv:+.2f} Nm per turn/s)"))
+    if J_meas is None and fl.get("accel_levels") and taus:
+        # one usable push level: J ~ (torque - friction mid-push) / acceleration
+        t_, a_ = max(((float(k), v) for k, v in fl["accel_levels"].items()), key=lambda kv: kv[0])
+        P(f"   single-push inertia check: ({t_:.2f} - {c:.2f}) / {a_:.2f} = {(t_ - c) / a_:.2f}")
     scale = kt_phys / kt                       # ODrive Nm -> real Nm
     drag = bl_scale * statistics.mean([a.get("drag_wheel") for a in bl.get("axes", {}).values() if a.get("drag_wheel")] or [0.0])
     ext = max(c - drag, 0.0)
@@ -683,10 +712,17 @@ def cmd_design(args) -> int:
       f"{kp * v_cmd:.2f} Nm at once, full {tau_max:.2f} Nm after {max(t_full, 0):.1f} s.")
 
     # 3. feed-forward
-    ff_c = round(0.9 * c, 2)
+    ff_floor = round(0.9 * c, 2)
+    ff_motor = round(0.9 * drag, 2) if drag > 0 else ff_floor
+    ff_c = ff_motor if args.ff_basis == "motor" else ff_floor
     P("\n3. FEED-FORWARD")
-    P(f"   friction_ff_nm {ff_c}  (90% of rolling friction: carries the cart without pushing it off")
-    P(f"   a standstill; breakaway, {tau_b:.2f} Nm, is left to the loop)")
+    P(f"   Rolling friction {c:.2f} Nm per wheel on the surface measured = {drag:.2f} motor drag (any surface)")
+    P(f"   + {max(c - drag, 0):.2f} from that surface and the casters. 90% of it carries the cart without")
+    P(f"   pushing it off a standstill; breakaway ({tau_b:.2f} Nm) and any extra are left to the loop.")
+    P(f"     --ff-basis floor : {ff_floor}  right for the surface measured; on a lower-friction floor it")
+    P(f"                        pushes {max(ff_floor - ff_motor, 0):.2f} Nm per wheel too hard (a surge on gentle starts)")
+    P(f"     --ff-basis motor : {ff_motor}  right on any surface; on the one measured, the loop carries the rest")
+    P(f"   -> friction_ff_nm {ff_c}  ({args.ff_basis})")
     P(f"   inertia_ff {J:.3f}  (the measured inertia: the ramp's acceleration costs no error)")
 
     # 4. acceleration and speed
@@ -868,7 +904,7 @@ def step_metrics(log, speeds, circ, hold):
                 row["rise"].append(rise)
                 row["overshoot"].append(max(v) / tgt - 1)
                 row["ripple"].append(statistics.pstdev(tail) / tgt if len(tail) > 2 else float("nan"))
-                row["amps"].append(statistics.mean(amps) if amps else float("nan"))
+                row["amps"].append(abs(statistics.mean(amps)) if amps else float("nan"))
                 row["jitter"].append(statistics.pstdev(amps) if len(amps) > 2 else float("nan"))
             st = [p for p in log if p["seg"] == "stop" + seg]
             row["stop"] = next((p["t"] - st[0]["t"] for p in st if abs(p["L"]) < 0.03 and abs(p["R"]) < 0.03),
@@ -900,6 +936,9 @@ def main() -> int:
     ap.add_argument("--mass-kg", type=float, default=17.2,
                     help="design: cart mass from a scale (17.2 kg = 38 lb, complete cart with the new casters, "
                          "weighed 2026-10-25; the earlier 16.5 lb was not the whole cart); 0 = infer")
+    ap.add_argument("--ff-basis", choices=("floor", "motor"), default="floor",
+                    help="design: size the friction feed-forward on the surface measured, or on motor drag only "
+                         "(for a cart that drives on more than one surface)")
     ap.add_argument("--drive-share", type=float, default=0.6,
                     help="design: fraction of the weight on the drive wheels (traction estimate)")
     ap.add_argument("--accel-cap", type=float, default=1.0, help="design: acceleration cap, m/s^2")
