@@ -200,6 +200,15 @@ class ODriveBase:
             # cannot trip it.
             axis.config.enable_watchdog = False
 
+        # Record what the board is holding BEFORE anything clears it: fw 0.5.1
+        # keeps no board-level error log, so the first clear_errors() erases
+        # the only trace of what tripped (2026-10-25: a latched DC-bus fault
+        # after a wall impact, cause lost this way).
+        held = self._error_words()
+        if any(held["axes"].values()) or held["brake_resistor_armed"] is False:
+            logger.warning("ODrive was holding errors before this connect: %s", self._fmt_held(held))
+        if held["brake_resistor_armed"] is False:
+            raise ConnectionError(f"ODrive brake resistor is DISARMED: {self._fmt_held(held)}")
         errors = self._enter_closed_loop(settle_s=0.5)
         if any(errors.values()):
             raise ConnectionError(
@@ -236,6 +245,21 @@ class ODriveBase:
             "left": getattr(self.left, "error", 0),
             "right": getattr(self.right, "error", 0),
         }
+
+    def _error_words(self) -> dict:
+        """Every error word the board exposes, read without clearing anything."""
+        out = {"axes": {}, "brake_resistor_armed": getattr(self.odrv, "brake_resistor_armed", None)}
+        for name, ax in (("left", self.left), ("right", self.right)):
+            out["axes"][name] = {k: int(getattr(obj, "error", 0) or 0) for k, obj in (
+                ("axis", ax), ("motor", ax.motor), ("encoder", ax.encoder), ("controller", ax.controller))}
+            out["axes"][name] = {k: v for k, v in out["axes"][name].items() if v}
+        return out
+
+    def _fmt_held(self, held: dict) -> str:
+        axes = {n: {k: hex(v) for k, v in e.items()} for n, e in held["axes"].items() if e}
+        bits = {n: e.get("axis", 0) for n, e in held["axes"].items()}
+        return (f"errors {axes or 'none'}, brake resistor armed {held['brake_resistor_armed']}"
+                + (f" - {self._explain(bits)}" if any(bits.values()) else ""))
 
     @staticmethod
     def _explain(errors: dict) -> str:
@@ -298,13 +322,16 @@ class ODriveBase:
             "left": getattr(self.left, "error", 0),
             "right": getattr(self.right, "error", 0),
         }
+        held = self._error_words()
         logger.warning(
-            "ODrive axes out of closed loop (states %s, errors %s, vbus %.1fV) - re-arming (#%d)",
+            "ODrive axes out of closed loop (states %s, %s, vbus %.1fV) - re-arming (#%d)",
             states,
-            {k: hex(v) for k, v in errors_before.items()},
+            self._fmt_held(held),
             getattr(self.odrv, "vbus_voltage", float("nan")),
             self._rearms,
         )
+        if held["brake_resistor_armed"] is False:
+            logger.error("ODrive brake resistor DISARMED - re-arming cannot work until the ODESC is power-cycled")
         # No sleeps: this is the control loop's read path. A few USB
         # transactions, then the next tick sees whether it took.
         errors = self._enter_closed_loop(settle_s=0.0, clear_sleep_s=0.0)
