@@ -104,6 +104,9 @@ the leader host reports **17 action keys** when they are right — 12 arm,
   half has to be on the Pi and the followers' half on the Orin.
 - **JetPack torch on the Orin.** The fork routes ARM to PyPI's CPU wheels,
   which is wrong for the machine that will run the policy.
+- **Wifi power saving off on both machines.** NetworkManager enables it by
+  default and it stalls the link for whole seconds; see "Wifi power saving
+  off" at the end of `ORIN-SETUP.md`.
 - **The rerun viewer on the Pi** for `--watch`. Check `rerun --help` for
   your version's listen flag.
 

@@ -424,3 +424,38 @@ it probes `torchcodec.decoders`, the import that actually loads the
 library). `./config/sync.sh` reports the state. Train on a machine where
 torchcodec loads if decode speed ever matters.
 
+
+### Wifi power saving off - here and on rosie (2026-10-27)
+
+NetworkManager turns wifi power saving on by default, on the Orin and on
+the Pi alike. The radio then dozes between bursts, and a link that reports
+540 Mbit/s on 5 GHz delivers a fraction of that with whole seconds of
+nothing: `iperf3 -c <mac>` from elroy measured 10 Mbit/s with two dead
+seconds out of ten. Video piles up behind those gaps - the viewer ran 9-11 s
+behind on every camera - and the leader actions queue with it
+(`Leader link stalled ... 300ms` about once a second). Turning it off
+removed the dead seconds.
+
+Here (the interface is `wlP1p1s0`, the connection `homenet`):
+
+```bash
+sudo iw dev wlP1p1s0 set power_save off                              # now
+sudo nmcli connection modify homenet 802-11-wireless.powersave 2     # every reconnect and boot
+nmcli -g 802-11-wireless.powersave connection show homenet           # -> disable
+```
+
+On rosie it is the same with `wlan0` and the connection Raspberry Pi Imager
+created, `preconfigured`. `iw` is in `/usr/sbin` there, so a plain
+`ssh rosie iw ...` reports it missing; use `sudo` or the full path.
+
+```bash
+sudo iw dev wlan0 set power_save off
+sudo nmcli connection modify preconfigured 802-11-wireless.powersave 2
+```
+
+Find the names with `iw dev` and
+`nmcli -t -f NAME,DEVICE connection show --active` if they change.
+
+This was not the whole of it: with power saving off elroy still measured
+3-20 Mbit/s each way, so the radio link itself (range, antennas, channel)
+is the next suspect.
