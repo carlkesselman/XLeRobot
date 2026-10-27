@@ -456,6 +456,26 @@ sudo nmcli connection modify preconfigured 802-11-wireless.powersave 2
 Find the names with `iw dev` and
 `nmcli -t -f NAME,DEVICE connection show --active` if they change.
 
-This was not the whole of it: with power saving off elroy still measured
-3-20 Mbit/s each way, so the radio link itself (range, antennas, channel)
-is the next suspect.
+That is not the whole of it on elroy. With `iw` showing power save off it
+still measured 3-20 Mbit/s each way, at -57 dBm and a 175 Mbit/s tx rate,
+while rosie through the same access point did 175. The card is the
+RTL8822CE, and JetPack loads NVIDIA's out-of-tree `rtl8822ce` driver, which
+has its own power management underneath `iw`: `rtw_power_mgnt=2` (maximum)
+and `rtw_ips_mode=1`. Both are load-time options, so this is a file and a
+reboot:
+
+```bash
+echo "options rtl8822ce rtw_power_mgnt=0 rtw_ips_mode=0" | sudo tee /etc/modprobe.d/rtl8822ce-nopowersave.conf
+sudo reboot
+cat /sys/module/rtl8822ce/parameters/rtw_power_mgnt   # -> 0
+cat /sys/module/rtl8822ce/parameters/rtw_ips_mode     # -> 0
+```
+
+After it: 108 Mbit/s elroy -> Mac, six retransmissions in ten seconds, and
+the viewer keeps up. NVIDIA's own `nvidia-preferred-oot-modules.conf` in
+`/etc/modprobe.d/` only picks this driver over the in-tree `rtw88`; it sets
+no options, so the two files do not conflict.
+
+elroy still transmits on one spatial stream (`iw dev wlP1p1s0 link` shows
+`tx ... VHT-NSS 1` against `rx ... VHT-NSS 2`). Reseating the two antenna
+leads on the M.2 card is the next thing to try if the link is ever short.
