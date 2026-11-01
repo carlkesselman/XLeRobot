@@ -7,7 +7,7 @@ carried their own, and a port or id fixed in one was wrong in the others.
 # by-id paths travel with the USB serial adapter, not the port it is in.
 PORTS = {
     1: "/dev/serial/by-id/usb-1a86_USB_Single_Serial_5A7A058116-if00",   # left arm + head
-    2: "/dev/serial/by-id/usb-1a86_USB_Single_Serial_5A68009991-if00",   # right arm (+ omniwheels)
+    2: "/dev/serial/by-id/usb-1a86_USB_Single_Serial_5B91028673-if00",   # right arm (+ omniwheels)
 }
 
 # id -> joint name, per bus. The wheels exist only with base: omniwheels.

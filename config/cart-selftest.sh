@@ -19,7 +19,7 @@ warn_if_cpu_torch
 
 CONFIG="${CONFIG:-$REPO/config/cart-remote.yaml}"   # the robot block; the teleop block is ignored here
 PORT1="${PORT1:-/dev/serial/by-id/usb-1a86_USB_Single_Serial_5A7A058116-if00}"
-PORT2="${PORT2:-/dev/serial/by-id/usb-1a86_USB_Single_Serial_5A68009991-if00}"
+PORT2="${PORT2:-/dev/serial/by-id/usb-1a86_USB_Single_Serial_5B91028673-if00}"
 
 require_dev "$PORT1" "left arm + head bus (port1)"
 require_dev "$PORT2" "right arm + base bus (port2)"

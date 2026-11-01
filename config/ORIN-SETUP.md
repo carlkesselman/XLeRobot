@@ -175,7 +175,7 @@ move to the Pi:
 | serial | role |
 |---|---|
 | `5A7A058116` | left follower → port1 |
-| `5A68009991` | right follower → port2 |
+| `5B91028673` | right follower → port2 |
 
 ---
 
@@ -328,7 +328,7 @@ uv run lerobot-calibrate \
   --robot.type=xlerobot \
   --robot.id=xlerobot \
   --robot.port1=/dev/serial/by-id/usb-1a86_USB_Single_Serial_5A7A058116-if00 \
-  --robot.port2=/dev/serial/by-id/usb-1a86_USB_Single_Serial_5A68009991-if00
+  --robot.port2=/dev/serial/by-id/usb-1a86_USB_Single_Serial_5B91028673-if00
 ```
 
 It runs in two passes, and the prompts matter:

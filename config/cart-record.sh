@@ -109,7 +109,7 @@ RESET_TIME_S="${RESET_TIME_S:-15}"
 
 # The followers are here. The leaders are not, and must not be.
 require_dev "/dev/serial/by-id/usb-1a86_USB_Single_Serial_5A7A058116-if00" "left follower (bus1)"
-require_dev "/dev/serial/by-id/usb-1a86_USB_Single_Serial_5A68009991-if00" "right follower (bus2)"
+require_dev "/dev/serial/by-id/usb-1a86_USB_Single_Serial_5B91028673-if00" "right follower (bus2)"
 
 OPERATOR="$(awk -F'[ #]+' '/remote_ip:/ {print $3; exit}' "$CONFIG")"
 if ! ping -c1 -W2 "$OPERATOR" >/dev/null 2>&1; then

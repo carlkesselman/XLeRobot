@@ -40,7 +40,7 @@ robot:
   id: xlerobot
 
   port1: /dev/serial/by-id/usb-1a86_USB_Single_Serial_5A7A058116-if00   # left arm + head
-  port2: /dev/serial/by-id/usb-1a86_USB_Single_Serial_5A68009991-if00   # right arm only
+  port2: /dev/serial/by-id/usb-1a86_USB_Single_Serial_5B91028673-if00   # right arm only
 
   # --- the ODrive base -------------------------------------------------
   # Geometry: MEASURE THESE. x.vel in m/s and theta.vel in deg/s - in the
