@@ -21,6 +21,8 @@ this workspace (see `_common.sh`), so no virtualenv needs activating.
 | `viewer.sh` | Mac | the rerun viewer, at the version the cart sends |
 | `cart-teleop.sh` | elroy | drive the robot, record nothing |
 | `cart-record.sh` | elroy | record a dataset |
+| `cart-train.sh` | elroy | train a policy on a recording, on Hugging Face Jobs |
+| `cart-eval.sh` | elroy | run a trained policy on the robot; `--record` scores episodes |
 | `cart-remote.yaml` | elroy | **the** robot: ports, cameras, base, plus the leader link. Everything on the cart reads its `robot:` block; `BASE=none\|omniwheels\|odrive` overrides the base per run |
 
 **Check and diagnose** (all on elroy unless noted):

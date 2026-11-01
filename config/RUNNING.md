@@ -169,6 +169,35 @@ The shared yaml's top-level `fps:` is a teleop field that `lerobot-record`
 rejects; the script records from a copy without it, so the yaml stays
 shared. The head camera is RGB now, like the wrists (it was BGR).
 
+### Training
+
+```bash
+./config/cart-train.sh carlkesselman/<name>
+```
+
+From elroy, where the recording is. A plain name picks the newest
+`<name>_<date>_<time>`; lerobot pushes it to a **private** Hub repo if it is
+not there yet, then submits ACT to Hugging Face Jobs (`FLAVOR=a10g-small`,
+`STEPS=100000`). The model lands at `carlkesselman/act_<name>`. Needs
+`hf auth login` and an HF account that can run Jobs. Run it in tmux: the log
+streams here, and an SSH drop ends the stream but not the job
+(`hf jobs logs <id>` picks it up again).
+
+### Running a policy
+
+```bash
+BASE=none ./config/cart-eval.sh carlkesselman/act_<name> "<task description>"
+BASE=none ./config/cart-eval.sh --record carlkesselman/act_<name> "<task description>"
+```
+
+**The policy drives the arms.** Use the same `BASE=` and the same task text
+as the recording. The first form runs for 60 s (`DURATION=`) and records
+nothing. `--record` runs 10 scored episodes into
+`carlkesselman/eval_act_<name>_<date>_<time>`, with the same episode keys as
+recording. rosie is not needed: between episodes the arms go back to their
+startup pose. `--leaders` connects to rosie instead, so the operator can
+reset the arms between episodes.
+
 ---
 
 ## Controls
